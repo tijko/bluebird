@@ -8,7 +8,7 @@
 
 /* The read would segfault the bird.  Check the input extra inspection. */
         
-#define WORD __WORDSIZE / CHAR_BIT
+#define WORD (__WORDSIZE / CHAR_BIT)
 
 #define WORD_ALIGNED(data_length) data_length + (WORD - (data_length % WORD))
 
@@ -143,7 +143,7 @@ static long *create_wordsize_array(char *data)
         num_of_words += 1;
 
     int word_aligned = WORD_ALIGNED(data_length);
-    char *word_buffer = malloc(sizeof(char) * word_aligned);
+    char *word_buffer = malloc(sizeof(char) * word_aligned + 1);
     memset(word_buffer, '\0', word_aligned);
 
     long *words = malloc(sizeof *words * num_of_words + 1);
@@ -173,7 +173,6 @@ static long bluebird_write(pid_t pid, unsigned const long addr,
 
 static PyObject *libbluebird_writeint(PyObject *self, PyObject *args)
 {
-    // go through bluebird_write....
     pid_t pid;
     unsigned const long addr;
     const long wr_data;
@@ -181,7 +180,9 @@ static PyObject *libbluebird_writeint(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ikl", &pid, &addr, &wr_data))
         return NULL;
 
-    if (bluebird_ptrace_call(PTRACE_POKETEXT, pid, addr, wr_data) < 0)
+    long writeint = bluebird_write(pid, addr, wr_data);
+
+    if (writeint < 0)
         return NULL;
 
     Py_RETURN_NONE;
@@ -189,7 +190,6 @@ static PyObject *libbluebird_writeint(PyObject *self, PyObject *args)
 
 static PyObject *libbluebird_writestring(PyObject *self, PyObject *args)
 {
-    // go through bluebird_write....
     pid_t pid;
     unsigned long addr;
     char *wr_data;
@@ -209,10 +209,12 @@ static PyObject *libbluebird_writestring(PyObject *self, PyObject *args)
     */
     
     for (int i=0; words[i] != 0; i++) {
-        if (bluebird_ptrace_call(PTRACE_POKETEXT, pid, addr, words[i]) < 0)
+        if (bluebird_write(pid, addr, words[i]) < 0)
             return NULL;
         addr += WORD;
     }
+
+    free(words);
 
     Py_RETURN_NONE;
 }
