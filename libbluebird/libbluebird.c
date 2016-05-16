@@ -1,18 +1,23 @@
 #include <signal.h>
+#include <unistd.h>
 #include <sys/reg.h>
+#include <stdbool.h>
 #include <sys/wait.h>
 #include <sys/user.h>
+#include <sys/select.h>
 #include <sys/ptrace.h>
 
 #include "libbluebird.h"
 
 /* The read would segfault the bird.  Check the input extra inspection. */
         
+#define WAIT_SLEEP 5000
+
 #define WORD (__WORDSIZE / CHAR_BIT)
 
 #define WORD_ALIGNED(data_length) data_length + (WORD - (data_length % WORD))
 
-static void handle_error(void)
+static void bluebird_handle_error(void)
 {
     char *exception, *message = strerror(errno);
 
@@ -42,36 +47,80 @@ static void handle_error(void)
         case (EINTR):
             exception = "EINTR";
             break;
+        case (EAGAIN):
+            exception = "EAGAIN";
+            break;
     }
 
     PyObject *error = Py_BuildValue("s", exception);
     PyErr_SetString(error, message);
 }
 
-static int ptrace_wait(pid_t pid)
+static int bluebird_ptrace_wait(pid_t pid)
 {
     int status;
 
-    if (waitpid(pid, &status, __WALL) < 0) {
-        handle_error();
+    struct timeval tm;
+
+    for (int i=0; i < 3; i++) {
+
+        if (waitpid(pid, &status, __WALL | WNOHANG) < 0) {
+            bluebird_handle_error();
+            return -1;
+        }
+
+        if (WIFSTOPPED(status)) 
+            return 0;
+
+        tm.tv_usec = WAIT_SLEEP;
+
+        select(0, NULL, NULL, NULL, &tm);
+    }
+
+    // set errno to unknown state
+    // handle other states (take extra parameter of signal)
+
+    return -1;
+}
+
+static int bluebird_ptrace_stop(pid_t pid)
+{
+    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) {
+        bluebird_handle_error();
         return -1;
     }
 
-    // handle status...
-    if (!WIFSTOPPED(status)) 
-        return -1;
-
-    return 0;
+    bluebird_ptrace_wait(pid);
 }
+
+static int bluebird_continue(pid_t pid) { return 0; }
 
 long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid, 
                           unsigned long addr, long data)
 {
+    if (req != PTRACE_ATTACH) 
+        if (bluebird_ptrace_wait(pid) < 0)
+            bluebird_ptrace_stop(pid);
+
     long ptrace_ret = ptrace(req, pid, addr, data);
+
     if (ptrace_ret < 0) {
-        handle_error();
+        bluebird_handle_error();
         return -1;
     }
+
+    /* XXX debug
+    PyObject *str;
+    if (req == PTRACE_ATTACH)
+        str = PyUnicode_FromString("attach\n");
+    else if (req == PTRACE_SYSCALL)
+        str = PyUnicode_FromString("syscall\n");
+    else if (req == PTRACE_GETREGS)
+        str = PyUnicode_FromString("getregs\n");
+    else if (req == PTRACE_CONT)
+        str = PyUnicode_FromString("cont\n");
+    PyObject_Print(str, stdout, Py_PRINT_RAW);
+    */
 
     return ptrace_ret;
 }
@@ -130,8 +179,62 @@ static PyObject *libbluebird_readint(PyObject *self, PyObject *args)
     return Py_BuildValue("i", read_int);
 }
 
+static PyObject *libbluebird_current_call(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+
+    if (!PyArg_ParseTuple(args, "i", &pid))
+        return NULL;
+
+    bluebird_ptrace_stop(pid);
+    ptrace(PTRACE_SYSCALL, pid, 0, 0);
+
+    struct user_regs_struct *rgs = malloc(sizeof *rgs);
+
+    int status;
+    waitpid(pid, &status, __WALL);
+
+    ptrace(PTRACE_GETREGS, pid, 0, rgs);
+
+    PyObject *call_number;
+
+    if (rgs->orig_eax <= 0) { 
+        ptrace(PTRACE_CONT, pid, 0, 0);
+        call_number = libbluebird_current_call(self, args);
+    } else  
+        call_number = PyUnicode_FromFormat("%d", rgs->orig_eax);
+
+    free(rgs);
+
+    ptrace(PTRACE_CONT, pid, 0, 0);
+
+    return call_number;
+}
+
+// find_call
 // POKE_USER
-// PEEK_USER
+
+static PyObject *libbluebird_resume(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+
+    if (!PyArg_ParseTuple(args, "i", &pid))
+        return NULL;
+
+    int status;
+    if (waitpid(pid, &status, __WALL | WNOHANG) < 0) {
+        bluebird_handle_error();
+        return NULL;
+    }
+    
+    if (!WIFSTOPPED(status))
+        Py_RETURN_NONE;
+
+    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+        return NULL;
+
+    Py_RETURN_NONE;
+}
 
 static long *create_wordsize_array(char *data)
 {
@@ -243,10 +346,9 @@ static PyObject *libbluebird_attach(PyObject *self, PyObject *args)
     if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) 
         return NULL;
 
-    ptrace_wait(pid);
-    // SIGCONT --> not responding?
-    // use separate mechanism for signals (i.e. make available as user func)
-
+    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+        return NULL;
+    
     Py_RETURN_NONE;
 }
 
@@ -268,6 +370,10 @@ static PyMethodDef libbluebirdmethods[] = {
      "attaches a trace on a running process"},
     {"detach", libbluebird_detach, METH_VARARGS,
      "detaches a currently traced process"},
+    {"resume", libbluebird_resume, METH_VARARGS,
+     "resumes a traced process currently stopped."},
+    {"current_call", libbluebird_current_call, METH_VARARGS,
+     "returns the current system call being made by process"},
     {"readint", libbluebird_readint, METH_VARARGS,
      "reads an int from process address"},
     {"readstring", libbluebird_readstring, METH_VARARGS,
