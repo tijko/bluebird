@@ -339,6 +339,9 @@ static PyObject *bluebird_writestring(PyObject *self, PyObject *args)
 
     free(words);
 
+    //bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0);
+    ptrace(PTRACE_CONT, pid, 0, 0);
+
     Py_RETURN_NONE;
 }
 
