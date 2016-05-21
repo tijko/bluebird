@@ -114,13 +114,13 @@ long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid,
 {
     int stopped = 0;
 
-    if (req != PTRACE_ATTACH) { 
-        if (bluebird_ptrace_wait(pid) < 0)
-            stopped = bluebird_ptrace_stop(pid);
-    }
+    if (bluebird_ptrace_wait(pid) < 0)
+        stopped = bluebird_ptrace_stop(pid);
 
-    if (stopped < 0)
+    if (stopped < 0) {
+        // set state error
         return -1;
+    }
 
     long ptrace_ret = ptrace(req, pid, addr, data);
 
@@ -178,6 +178,8 @@ static PyObject *bluebird_readstring(PyObject *self, PyObject *args)
         addr += WORD;
     }
  
+    ptrace(PTRACE_CONT, pid, 0, 0);
+
     words[WORD * words_to_read] = '\0';
 
     return Py_BuildValue("s", words);
@@ -339,7 +341,6 @@ static PyObject *bluebird_writestring(PyObject *self, PyObject *args)
 
     free(words);
 
-    //bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0);
     ptrace(PTRACE_CONT, pid, 0, 0);
 
     Py_RETURN_NONE;
@@ -391,26 +392,12 @@ static PyObject *bluebird_attach(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i", &pid)) 
         return NULL;
 
-    if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) 
+    if (ptrace(PTRACE_ATTACH, pid, 0, 0) < 0)
         return NULL;
 
     if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
         return NULL;
-/*
-    int status;
-    if (ptrace(PTRACE_ATTACH, pid, 0, 0) < 0) {
-        bluebird_handle_error(); 
-        return NULL;
-    }
 
-    waitpid(pid, &status, __WALL);
-
-    if (ptrace(PTRACE_CONT, pid, 0, 0) < 0) {
-        bluebird_handle_error();
-        return NULL;
-    }
-*/
-     
     Py_RETURN_NONE;
 }
 
