@@ -52,7 +52,6 @@ class BlueBirdTest(unittest.TestCase):
         writestring(test_proc_pid, test_proc_addr, test_proc_word)
         sleep(2)
         test_proc.kill()
-        test_proc_file.close()
         with open(test_proc_filename) as test_file:
             proc_output = test_file.read()
         unlink(test_proc_filename)
@@ -61,7 +60,17 @@ class BlueBirdTest(unittest.TestCase):
         after_write = proc_output_lines[-1]
         self.assertEqual(after_write, test_proc_newoutput)
         self.assertNotEqual(after_write, test_proc_output)
-
+    
+    def test_readstring(self):
+        test_proc_addr = 0x4006e4
+        test_proc_word = 'Process'
+        test_proc = Popen('./alt_print', stdout=PIPE)
+        test_proc_pid = test_proc.pid
+        attach(test_proc_pid)
+        word = readstring(test_proc_pid, test_proc_addr, 1)
+        test_proc.terminate()
+        self.assertEqual(test_proc_word, word)
+      
 
 if __name__ == "__main__":
     unittest.main()
