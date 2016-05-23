@@ -86,8 +86,9 @@ static int bluebird_ptrace_wait(pid_t pid)
         bluebird_sleep();
     }
 
-    // set errno to unknown state
-    // handle other states (take extra parameter of signal)
+
+    errno = ESRCH;
+    bluebird_handle_error();
 
     return -1;
 }
@@ -101,8 +102,11 @@ static int bluebird_ptrace_stop(pid_t pid)
 
     bluebird_sleep();
 
-    if (bluebird_ptrace_wait(pid) < 0)
+    if (bluebird_ptrace_wait(pid) < 0) {
+        errno = ESRCH;
+        bluebird_handle_error();
         return -1;
+    }
 
     return 0;
 }
@@ -117,10 +121,8 @@ long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid,
     if (bluebird_ptrace_wait(pid) < 0)
         stopped = bluebird_ptrace_stop(pid);
 
-    if (stopped < 0) {
-        // set state error
+    if (stopped < 0) 
         return -1;
-    }
 
     long ptrace_ret = ptrace(req, pid, addr, data);
 
@@ -201,36 +203,46 @@ static PyObject *bluebird_readint(PyObject *self, PyObject *args)
     return Py_BuildValue("i", read_int);
 }
 
-static PyObject *bluebird_current_call(PyObject *self, PyObject *args)
+static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
 {
     pid_t pid;
 
     if (!PyArg_ParseTuple(args, "i", &pid))
         return NULL;
 
-    bluebird_ptrace_stop(pid);
-    ptrace(PTRACE_SYSCALL, pid, 0, 0);
+    struct user_regs_struct rgs;
 
-    struct user_regs_struct *rgs = malloc(sizeof *rgs);
+
+    if (bluebird_ptrace_stop(pid) < 0)
+        return NULL;
+
+syscall:
+
+    if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0) 
+        goto error;
 
     int status;
     waitpid(pid, &status, __WALL);
 
-    ptrace(PTRACE_GETREGS, pid, 0, rgs);
+    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
+        goto error;
 
     PyObject *call_number;
 
-    if (rgs->orig_rax <= 0) { 
-        ptrace(PTRACE_CONT, pid, 0, 0);
-        call_number = bluebird_current_call(self, args);
-    } else  
-        call_number = PyUnicode_FromFormat("%d", rgs->orig_rax);
+    if (rgs.orig_rax == 219 || rgs.orig_rax <= 0)
+        goto syscall;
+    else  
+        call_number = PyUnicode_FromFormat("%d", rgs.orig_rax);
 
-    free(rgs);
-
-    ptrace(PTRACE_CONT, pid, 0, 0);
+    if (ptrace(PTRACE_CONT, pid, 0, 0) < 0)
+        goto error;
 
     return call_number;
+
+    error:
+        bluebird_handle_error();
+        
+    return NULL;
 }
 
 // find_call
@@ -392,10 +404,12 @@ static PyObject *bluebird_attach(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i", &pid)) 
         return NULL;
 
-    if (ptrace(PTRACE_ATTACH, pid, 0, 0) < 0)
+    if (ptrace(PTRACE_ATTACH, pid, 0, 0) < 0) {
+        bluebird_handle_error();
         return NULL;
+    }
 
-    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) 
         return NULL;
 
     Py_RETURN_NONE;
@@ -421,7 +435,7 @@ static PyMethodDef bluebirdmethods[] = {
      "detaches a currently traced process"},
     {"resume", bluebird_resume, METH_VARARGS,
      "resumes a traced process currently stopped."},
-    {"current_call", bluebird_current_call, METH_VARARGS,
+    {"get_syscall", bluebird_get_syscall, METH_VARARGS,
      "returns the current system call being made by process"},
     {"readint", bluebird_readint, METH_VARARGS,
      "reads an int from process address"},
