@@ -51,6 +51,7 @@ class BlueBirdTest(unittest.TestCase):
         attach(test_proc_pid)
         writestring(test_proc_pid, test_proc_addr, test_proc_word)
         sleep(2)
+        test_proc_file.close()
         test_proc.kill()
         with open(test_proc_filename) as test_file:
             proc_output = test_file.read()
@@ -68,7 +69,8 @@ class BlueBirdTest(unittest.TestCase):
         test_proc_pid = test_proc.pid
         attach(test_proc_pid)
         word = readstring(test_proc_pid, test_proc_addr, 1)
-        test_proc.terminate()
+        test_proc.stdout.close()
+        test_proc.kill()
         self.assertEqual(test_proc_word, word)
       
 
