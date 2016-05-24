@@ -110,8 +110,6 @@ static int bluebird_ptrace_stop(pid_t pid)
     return 0;
 }
 
-//static int bluebird_continue(pid_t pid) { return 0; }
-
 static bool is_stopped(pid_t pid)
 {
     char proc_pid_path[PATH_MAX + 1];
@@ -159,19 +157,6 @@ long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid,
         bluebird_handle_error();
         return -1;
     }
-
-    /* XXX debug
-    PyObject *str = NULL;
-    if (req == PTRACE_ATTACH)
-        str = PyUnicode_FromString("attach\n");
-    else if (req == PTRACE_SYSCALL)
-        str = PyUnicode_FromString("syscall\n");
-    else if (req == PTRACE_GETREGS)
-        str = PyUnicode_FromString("getregs\n");
-    else if (req == PTRACE_CONT)
-        str = PyUnicode_FromString("cont\n");
-    PyObject_Print(str, stdout, Py_PRINT_RAW);
-    */
 
     return ptrace_ret;
 }
@@ -232,6 +217,48 @@ static PyObject *bluebird_readint(PyObject *self, PyObject *args)
     return Py_BuildValue("i", read_int);
 }
 
+static inline void set_syscall(pid_t pid)
+{
+    bluebird_ptrace_call(PTRACE_SYSCALL, pid, 0, 0);
+
+    int status;
+
+    waitpid(pid, &status, __WALL);
+}
+
+static int *get_syscalls(pid_t pid, int nsyscalls)
+{
+    struct user_regs_struct rgs;
+    int *calls = malloc(sizeof(int) * nsyscalls);
+    int syscalls_made = 0;
+
+    if (!calls)
+        return NULL;
+
+    while (syscalls_made < nsyscalls) {
+
+        set_syscall(pid);
+
+        if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
+            goto error;
+
+        if (rgs.orig_rax == 219 || rgs.rax == -ENOSYS)
+            continue;
+
+        calls[syscalls_made++] = rgs.orig_rax;
+    }
+
+    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+        goto error;
+
+    return calls;
+
+    error:
+        bluebird_handle_error();
+
+    return NULL;
+}
+
 static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
 {
     pid_t pid;
@@ -239,39 +266,43 @@ static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i", &pid))
         return NULL;
 
-    struct user_regs_struct rgs;
+    int *call = get_syscalls(pid, 1);
 
-syscall:
+    if (!call)
+        return NULL;
 
-    if (bluebird_ptrace_call(PTRACE_SYSCALL, pid, 0, 0) < 0) 
-        goto error;
+    PyObject *pycall = PyLong_FromLong(*call);
 
-    int status;
-    waitpid(pid, &status, __WALL);
+    free(call);
 
-    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
-        goto error;
-
-    PyObject *call_number;
-
-    if (rgs.orig_rax == 219 || rgs.orig_rax <= 0)
-        goto syscall;
-    else  
-        call_number = PyLong_FromLong(rgs.orig_rax);
-
-    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
-        goto error;
-
-    return call_number;
-
-    error:
-        bluebird_handle_error();
-        
-    return NULL;
+    return pycall;
 }
 
-// find_call
-// POKE_USER
+static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    int nsyscalls;
+
+    if (!PyArg_ParseTuple(args, "ii", &pid, &nsyscalls))
+        return NULL;
+
+    int *syscalls = get_syscalls(pid, nsyscalls);
+
+    if (!syscalls)
+        return NULL;
+
+    PyObject *call_list = PyList_New(nsyscalls);
+
+    for (int i=0; i < nsyscalls; i++) {
+
+        PyObject *pycall = PyLong_FromLong(syscalls[i]);
+        PyList_SetItem(call_list, i, pycall);
+    }
+
+    free(syscalls);
+
+    return call_list;
+}
 
 static PyObject *bluebird_resume(PyObject *self, PyObject *args)
 {
@@ -361,15 +392,6 @@ static PyObject *bluebird_writestring(PyObject *self, PyObject *args)
 
     long *words = create_wordsize_array(wr_data);
 
-    /*
-    XXX debug
-    for (int i=0; words[i]; i++) {
-        PyObject *str = PyUnicode_FromString(words[i]);
-        PyObject_Print(str, stdout, Py_PRINT_RAW);
-
-    }
-    */
-    
     for (int i=0; words[i] != 0; i++) {
         if (bluebird_write(pid, addr, words[i]) < 0)
             return NULL;
@@ -462,6 +484,8 @@ static PyMethodDef bluebirdmethods[] = {
      "resumes a traced process currently stopped."},
     {"get_syscall", bluebird_get_syscall, METH_VARARGS,
      "returns the current system call being made by process"},
+    {"get_syscalls", bluebird_get_syscalls, METH_VARARGS,
+     "return a list of the last N system calls made by process"},
     {"readint", bluebird_readint, METH_VARARGS,
      "reads an int from process address"},
     {"readstring", bluebird_readstring, METH_VARARGS,
