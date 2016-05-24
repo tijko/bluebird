@@ -257,7 +257,8 @@ syscall:
     if (rgs.orig_rax == 219 || rgs.orig_rax <= 0)
         goto syscall;
     else  
-        call_number = PyUnicode_FromFormat("%d", rgs.orig_rax);
+//        call_number = PyUnicode_FromFormat("%d", rgs.orig_rax);
+        call_number = PyLong_FromLong(rgs.orig_rax);
 
     if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
         goto error;
