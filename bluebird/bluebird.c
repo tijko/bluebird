@@ -413,6 +413,8 @@ static bool is_yama_enabled(void)
     if (!yama)
         return false;
 
+    fclose(yama);
+
     return fgetc(yama) == '1' ? true : false;
 }
 
