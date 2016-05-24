@@ -413,9 +413,11 @@ static bool is_yama_enabled(void)
     if (!yama)
         return false;
 
+    bool yama_enabled = fgetc(yama) == '1' ? true : false;
+
     fclose(yama);
 
-    return fgetc(yama) == '1' ? true : false;
+    return yama_enabled;
 }
 
 static bool is_traceable(void)
