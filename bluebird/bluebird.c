@@ -86,7 +86,6 @@ static int bluebird_ptrace_wait(pid_t pid)
         bluebird_sleep();
     }
 
-
     errno = ESRCH;
     bluebird_handle_error();
 
@@ -113,12 +112,42 @@ static int bluebird_ptrace_stop(pid_t pid)
 
 //static int bluebird_continue(pid_t pid) { return 0; }
 
+static bool is_stopped(pid_t pid)
+{
+    char proc_pid_path[PATH_MAX + 1];
+    snprintf(proc_pid_path, PATH_MAX, "/proc/%d/status", pid);
+
+    FILE *fobj = fopen(proc_pid_path, "r");
+    if (!fobj) {
+        bluebird_handle_error();
+        return false;
+    }
+
+    size_t n_bytes = 0;
+    char *fobj_ln = NULL;
+    char *field = "State";
+    char *state = "\tt ";
+    bool pid_state = false;
+
+    while (getline(&fobj_ln, &n_bytes, fobj) != -1) {
+        if (strstr(fobj_ln, field) &&
+            strstr(fobj_ln, state)) {
+            pid_state = true;
+            break;
+        }
+    }
+    
+    fclose(fobj);
+
+    return pid_state;
+}
+
 long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid, 
                           unsigned long addr, long data)
 {
     int stopped = 0;
 
-    if (bluebird_ptrace_wait(pid) < 0)
+    if (req != PTRACE_ATTACH && !is_stopped(pid))
         stopped = bluebird_ptrace_stop(pid);
 
     if (stopped < 0) 
@@ -212,13 +241,9 @@ static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
 
     struct user_regs_struct rgs;
 
-
-    if (bluebird_ptrace_stop(pid) < 0)
-        return NULL;
-
 syscall:
 
-    if (ptrace(PTRACE_SYSCALL, pid, 0, 0) < 0) 
+    if (bluebird_ptrace_call(PTRACE_SYSCALL, pid, 0, 0) < 0) 
         goto error;
 
     int status;
@@ -234,7 +259,7 @@ syscall:
     else  
         call_number = PyUnicode_FromFormat("%d", rgs.orig_rax);
 
-    if (ptrace(PTRACE_CONT, pid, 0, 0) < 0)
+    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
         goto error;
 
     return call_number;
@@ -404,7 +429,7 @@ static PyObject *bluebird_attach(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i", &pid)) 
         return NULL;
 
-    if (ptrace(PTRACE_ATTACH, pid, 0, 0) < 0) {
+    if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) {
         bluebird_handle_error();
         return NULL;
     }
