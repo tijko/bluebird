@@ -61,7 +61,7 @@ class BlueBirdTest(unittest.TestCase):
         after_write = proc_output_lines[-1]
         self.assertEqual(after_write, test_proc_newoutput)
         self.assertNotEqual(after_write, test_proc_output)
-    
+     
     def test_readstring(self):
         test_proc_addr = 0x4006e4
         test_proc_word = 'Process'
@@ -73,6 +73,17 @@ class BlueBirdTest(unittest.TestCase):
         test_proc.kill()
         self.assertEqual(test_proc_word, word)
       
+    def test_get_syscall(self):
+        test_proc_test_syscalls = ['1', '35']
+        test_proc = Popen('./alt_print', stdout=PIPE)
+        test_proc_pid = test_proc.pid
+        attach(test_proc_pid)
+        sleep(1)
+        syscall = get_syscall(test_proc_pid)
+        test_proc.stdout.close()
+        test_proc.kill()
+        self.assertIn(syscall, test_proc_test_syscalls)
+    
 
 if __name__ == "__main__":
     unittest.main()
