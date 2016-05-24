@@ -14,28 +14,31 @@ def parse_proc_status(pid):
     tracer_field = 'TracerPid'
     proc_pid_path = '/proc/{}/status'.format(pid)
     with open(proc_pid_path) as f:
-        status_raw = f.read()
-    tracerpid_pos = status_raw.find(tracer_field)
-    if tracerpid_pos == -1:
-        return 0
-    status_fields = [field.split('\t') for field in status_raw.split('\n')]
-    for field in status_fields:
-        if tracer_field in field[0]:
-            return int(field[1]) 
-    return 0
+        status_raw = f.readlines()
+    tracer_field = status_raw[6].split()
+    return int(tracer_field[1])
 
 
 class BlueBirdTest(unittest.TestCase):
 
+    def create_test_proc(self, stdout=PIPE):
+        self.test_proc = Popen('./alt_print', stdout=stdout)
+        self.test_proc_pid = self.test_proc.pid
+        attach(self.test_proc_pid)
+
+    def setUp(self):
+        self.create_test_proc()
+
+    def tearDown(self):
+        if self.test_proc.stdout is not None:
+            self.test_proc.stdout.close()
+        self.test_proc.kill()
+        
     def test_attach(self):
-        test_pid = getpid()
         number_of_attaches = 10
-        test_program = './alt_print'
         for _ in range(number_of_attaches):
-            test_proc = Popen(test_program, stdout=PIPE)
-            test_proc_pid = test_proc.pid
-            attach(test_proc_pid)
-            tracer_pid = parse_proc_status(test_proc_pid)
+            self.create_test_proc()
+            tracer_pid = parse_proc_status(self.test_proc_pid)
             self.assertEqual(test_pid, tracer_pid)
                         
     def test_writestring(self):
@@ -43,16 +46,13 @@ class BlueBirdTest(unittest.TestCase):
         test_proc_word = 'Potatoe'
         test_proc_filename = 'alt_print.txt'
         test_proc_file = open(test_proc_filename, 'x')
-        test_proc = Popen('./alt_print', stdout=test_proc_file)
-        test_proc_pid = test_proc.pid
-        test_proc_output = 'Process <{}> is running!'.format(test_proc_pid)
+        self.create_test_proc(stdout=test_proc_file)
+        test_proc_output = 'Process <{}> is running!'.format(self.test_proc_pid)
         test_proc_newoutput = '{} <{}> is running!'.format(test_proc_word, 
-                                                           test_proc_pid)
-        attach(test_proc_pid)
-        writestring(test_proc_pid, test_proc_addr, test_proc_word)
+                                                           self.test_proc_pid)
+        writestring(self.test_proc_pid, test_proc_addr, test_proc_word)
         sleep(2)
         test_proc_file.close()
-        test_proc.kill()
         with open(test_proc_filename) as test_file:
             proc_output = test_file.read()
         unlink(test_proc_filename)
@@ -65,25 +65,25 @@ class BlueBirdTest(unittest.TestCase):
     def test_readstring(self):
         test_proc_addr = 0x4006e4
         test_proc_word = 'Process'
-        test_proc = Popen('./alt_print', stdout=PIPE)
-        test_proc_pid = test_proc.pid
-        attach(test_proc_pid)
-        word = readstring(test_proc_pid, test_proc_addr, 1)
-        test_proc.stdout.close()
-        test_proc.kill()
+        word = readstring(self.test_proc_pid, test_proc_addr, 1)
         self.assertEqual(test_proc_word, word)
       
     def test_get_syscall(self):
         test_proc_test_syscalls = ['1', '35']
-        test_proc = Popen('./alt_print', stdout=PIPE)
-        test_proc_pid = test_proc.pid
-        attach(test_proc_pid)
         sleep(1)
-        syscall = get_syscall(test_proc_pid)
-        test_proc.stdout.close()
-        test_proc.kill()
+        syscall = get_syscall(self.test_proc_pid)
         self.assertIn(syscall, test_proc_test_syscalls)
-    
+
+    def test_detach(self):
+        test_proc = Popen('./alt_print', stdout=PIPE)
+        sleep(1)
+        tracer_pid = parse_proc_status(self.test_proc_pid)
+        self.assertEqual(test_pid, tracer_pid)
+        detach(self.test_proc_pid)
+        tracer_pid = parse_proc_status(self.test_proc_pid)
+        self.assertEqual(0, tracer_pid)
+
 
 if __name__ == "__main__":
+    test_pid = getpid()
     unittest.main()
