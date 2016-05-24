@@ -69,7 +69,7 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(test_proc_word, word)
       
     def test_get_syscall(self):
-        test_proc_test_syscalls = ['1', '35']
+        test_proc_test_syscalls = (1, 35)
         sleep(1)
         syscall = get_syscall(self.test_proc_pid)
         self.assertIn(syscall, test_proc_test_syscalls)
