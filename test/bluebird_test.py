@@ -69,10 +69,15 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(test_proc_word, word)
       
     def test_get_syscall(self):
-        test_proc_test_syscalls = (1, 35)
         sleep(1)
         syscall = get_syscall(self.test_proc_pid)
-        self.assertIn(syscall, test_proc_test_syscalls)
+        self.assertIn(syscall, test_proc_syscalls)
+
+    def test_get_syscalls(self):
+        sleep(1)
+        test_syscalls = get_syscalls(self.test_proc_pid, 4)
+        calls = test_proc_syscalls * 2 
+        self.assertCountEqual(test_syscalls, calls)
 
     def test_detach(self):
         test_proc = Popen('./alt_print', stdout=PIPE)
@@ -86,4 +91,5 @@ class BlueBirdTest(unittest.TestCase):
 
 if __name__ == "__main__":
     test_pid = getpid()
+    test_proc_syscalls = (1, 35)
     unittest.main()
