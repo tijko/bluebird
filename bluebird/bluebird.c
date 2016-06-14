@@ -283,7 +283,7 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ii", &pid, &call))
         return NULL;
 
-    
+    // XXX use a timeout instead of infinite loop 
     while (true) {
 
         int *current_call = get_syscalls(pid, 1, false);
