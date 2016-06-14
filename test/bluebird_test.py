@@ -42,7 +42,9 @@ class BlueBirdTest(unittest.TestCase):
             self.assertEqual(test_pid, tracer_pid)
                         
     def test_writestring(self):
-        test_proc_addr = 0x4006e4
+        # XXX using address from objdump -s alt_print
+        # find a way to universally calculate address reading the binary
+        test_proc_addr = 0x400754
         test_proc_word = 'Potatoe'
         test_proc_filename = 'alt_print.txt'
         test_proc_file = open(test_proc_filename, 'x')
@@ -63,7 +65,9 @@ class BlueBirdTest(unittest.TestCase):
         self.assertNotEqual(after_write, test_proc_output)
      
     def test_readstring(self):
-        test_proc_addr = 0x4006e4
+        # XXX using address from objdump -s alt_print
+        # find a way to universally calculate address reading the binary
+        test_proc_addr = 0x400754
         test_proc_word = 'Process'
         word = readstring(self.test_proc_pid, test_proc_addr, 1)
         self.assertEqual(test_proc_word, word)
@@ -79,6 +83,11 @@ class BlueBirdTest(unittest.TestCase):
         calls = test_proc_syscalls * 2 
         self.assertCountEqual(test_syscalls, calls)
 
+    def test_find_syscall(self):
+        getsid = 124
+        test_find = find_syscall(self.test_proc_pid, getsid)
+        self.assertIsNone(test_find)
+
     def test_detach(self):
         test_proc = Popen('./alt_print', stdout=PIPE)
         sleep(1)
@@ -89,7 +98,9 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(0, tracer_pid)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
+    # XXX these syscalls are defined in /usr/include/asm/unistd_64.h
+    # rewrite to allow compatibility for 32 too.
     test_pid = getpid()
     test_proc_syscalls = (1, 35)
     unittest.main()
