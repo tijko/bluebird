@@ -110,6 +110,8 @@ static int bluebird_ptrace_stop(pid_t pid)
     return 0;
 }
 
+//static int bluebird_continue(pid_t pid) { return 0; }
+
 static bool is_stopped(pid_t pid)
 {
     char proc_pid_path[PATH_MAX + 1];
@@ -123,13 +125,11 @@ static bool is_stopped(pid_t pid)
 
     size_t n_bytes = 0;
     char *fobj_ln = NULL;
-    char *field = "State";
-    char *state = "\tt ";
     bool pid_state = false;
 
     while (getline(&fobj_ln, &n_bytes, fobj) != -1) {
-        if (strstr(fobj_ln, field) &&
-            strstr(fobj_ln, state)) {
+        if (strstr(fobj_ln, "State") &&
+            strstr(fobj_ln, "\tt")) {
             pid_state = true;
             break;
         }
@@ -157,6 +157,19 @@ long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid,
         bluebird_handle_error();
         return -1;
     }
+
+    /* XXX debug
+    PyObject *str = NULL;
+    if (req == PTRACE_ATTACH)
+        str = PyUnicode_FromString("attach\n");
+    else if (req == PTRACE_SYSCALL)
+        str = PyUnicode_FromString("syscall\n");
+    else if (req == PTRACE_GETREGS)
+        str = PyUnicode_FromString("getregs\n");
+    else if (req == PTRACE_CONT)
+        str = PyUnicode_FromString("cont\n");
+    PyObject_Print(str, stdout, Py_PRINT_RAW);
+    */
 
     return ptrace_ret;
 }
@@ -226,7 +239,7 @@ static inline void set_syscall(pid_t pid)
     waitpid(pid, &status, __WALL);
 }
 
-static int *get_syscalls(pid_t pid, int nsyscalls)
+static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
 {
     struct user_regs_struct rgs;
     int *calls = malloc(sizeof(int) * nsyscalls);
@@ -242,14 +255,17 @@ static int *get_syscalls(pid_t pid, int nsyscalls)
         if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
             goto error;
 
+        //  checking the restart_call kernel syscall after SIGSTP
+        //  orig_rax mask against 0x80 SIGTRAP for info on entry/exit?
         if (rgs.orig_rax == 219 || rgs.rax == -ENOSYS)
             continue;
 
         calls[syscalls_made++] = rgs.orig_rax;
     }
 
-    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
-        goto error;
+    if (signal_cont)
+        if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+            goto error;
 
     return calls;
 
@@ -259,6 +275,28 @@ static int *get_syscalls(pid_t pid, int nsyscalls)
     return NULL;
 }
 
+static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    int call;
+
+    if (!PyArg_ParseTuple(args, "ii", &pid, &call))
+        return NULL;
+
+    
+    while (true) {
+
+        int *current_call = get_syscalls(pid, 1, false);
+
+        if (!current_call)
+            bluebird_handle_error();    
+        else if (*current_call != call)
+            bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0);
+        else 
+            Py_RETURN_NONE;
+    }    
+}
+
 static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
 {
     pid_t pid;
@@ -266,7 +304,7 @@ static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i", &pid))
         return NULL;
 
-    int *call = get_syscalls(pid, 1);
+    int *call = get_syscalls(pid, 1, true);
 
     if (!call)
         return NULL;
@@ -277,7 +315,8 @@ static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
 
     return pycall;
 }
-
+// XXX alloc the mem in each individual call passing along OR
+//     alloc in the call returning then freeing 
 static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
 {
     pid_t pid;
@@ -286,7 +325,7 @@ static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ii", &pid, &nsyscalls))
         return NULL;
 
-    int *syscalls = get_syscalls(pid, nsyscalls);
+    int *syscalls = get_syscalls(pid, nsyscalls, true);
 
     if (!syscalls)
         return NULL;
@@ -303,6 +342,8 @@ static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
 
     return call_list;
 }
+
+// POKE_USER
 
 static PyObject *bluebird_resume(PyObject *self, PyObject *args)
 {
@@ -392,6 +433,15 @@ static PyObject *bluebird_writestring(PyObject *self, PyObject *args)
 
     long *words = create_wordsize_array(wr_data);
 
+    /*
+    XXX debug
+    for (int i=0; words[i]; i++) {
+        PyObject *str = PyUnicode_FromString(words[i]);
+        PyObject_Print(str, stdout, Py_PRINT_RAW);
+
+    }
+    */
+    
     for (int i=0; words[i] != 0; i++) {
         if (bluebird_write(pid, addr, words[i]) < 0)
             return NULL;
@@ -414,7 +464,6 @@ static bool is_yama_enabled(void)
         return false;
 
     bool yama_enabled = fgetc(yama) == '1' ? true : false;
-
     fclose(yama);
 
     return yama_enabled;
@@ -488,6 +537,8 @@ static PyMethodDef bluebirdmethods[] = {
      "resumes a traced process currently stopped."},
     {"get_syscall", bluebird_get_syscall, METH_VARARGS,
      "returns the current system call being made by process"},
+    {"find_syscall", bluebird_find_syscall, METH_VARARGS,
+     "checks process on each system call stopping on call provided"},
     {"get_syscalls", bluebird_get_syscalls, METH_VARARGS,
      "return a list of the last N system calls made by process"},
     {"readint", bluebird_readint, METH_VARARGS,
