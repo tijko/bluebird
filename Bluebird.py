@@ -7,7 +7,23 @@ from os import getpid
 from threading import Thread
 
 
+class TraceResults(object):
+
+    def __init__(self, trace_value=None):
+        self.trace_value = trace_value
+
+    def __get__(self, obj, objtype):
+        return self.trace_value
+
+    def __set__(self, obj, value):
+        if obj.tracing:
+            raise RunningTraceError
+        self.trace_value = value
+
+
 class Bluebird(object):
+
+    trace_results = TraceResults()
 
     def __init__(self, pid):
         self.pid = getpid()
@@ -15,8 +31,11 @@ class Bluebird(object):
         self.wstrs = {}
         self.rstrs = {}
         self.attached = False
+        self.tracing = False
+        # set attached pid COMM
 
     def start(self):
+        # XXX handle already attached trace
         if not self.attached:
             attach(self.traced_pid)
             self.attached = True
@@ -55,8 +74,15 @@ class Bluebird(object):
         # syscalls without allowing any calls to slip by
         return get_syscalls(self.traced_pid, nsyscalls)
 
-    def get_call(self, call):
-        return find_syscall(self.traced_pid, call)
+    # halts process at entrance to syscall
+    def get_call(self, call, non_blocking=False, timeout=None):
+        if non_blocking:
+            # check for another running thread
+            trace_thread = TracingThread(self, find_syscall, None, 
+                                         self.traced_pid, call)
+            trace_thread.start()
+        else:    
+            return find_syscall(self.traced_pid, call)
 
     def dump_exec(self):
         pass
@@ -79,3 +105,24 @@ class Bluebird(object):
         status = [field.split('\t') for field in status_raw.split('\n')]
         return status
         
+
+class TracingThread(Thread):
+
+    def __init__(self, trace_obj, trace_func, trace_cb, *args):
+        super(TracingThread, self).__init__()
+        self.trace_obj = trace_obj
+        self.trace_func = trace_func
+        self.trace_cb = trace_cb
+        self.args = args
+
+    def run(self):
+        self.trace_obj.tracing = True
+        trace_results = self.trace_func(*self.args)
+        self.trace_obj.tracing = False
+        self.trace_obj.trace_results = trace_results
+
+
+class RunningTraceError(BaseException):
+
+    def __str__(self):
+        return 'Trace in progress'
