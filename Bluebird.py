@@ -2,8 +2,9 @@
 # -*- coding: utf-8 -*-
 
 from bluebird import *
-from os import getpid
 
+from os import getpid
+from time import sleep
 from threading import Thread
 
 
@@ -78,6 +79,8 @@ class Bluebird(object):
     def get_call(self, call, non_blocking=False, timeout=None):
         if non_blocking:
             # check for another running thread
+            self.stop()
+            sleep(1)
             trace_thread = TracingThread(self, find_syscall, None, 
                                          self.traced_pid, call)
             trace_thread.start()
@@ -120,6 +123,7 @@ class TracingThread(Thread):
         trace_results = self.trace_func(*self.args)
         self.trace_obj.tracing = False
         self.trace_obj.trace_results = trace_results
+        self.trace_obj.start()
 
 
 class RunningTraceError(BaseException):
