@@ -1,5 +1,6 @@
 #include <Python.h>
 
+#include <sched.h>
 #include <signal.h>
 #include <unistd.h>
 #include <sys/reg.h>
@@ -8,7 +9,8 @@
 #include <sys/user.h>
 #include <sys/select.h>
 #include <sys/ptrace.h>
-
+//
+#include <pthread.h>
 
 /* The read would segfault the bird.  Check the input extra inspection. */
         
@@ -75,10 +77,8 @@ static int bluebird_ptrace_wait(pid_t pid)
 
     for (int i=0; i < 2; i++) {
 
-        if (waitpid(pid, &status, __WALL | WNOHANG) < 0) {
-            bluebird_handle_error();
+        if (waitpid(pid, &status, __WALL | WNOHANG) < 0) 
             return -1;
-        }
 
         if (WIFSTOPPED(status)) 
             return 0;
@@ -87,23 +87,19 @@ static int bluebird_ptrace_wait(pid_t pid)
     }
 
     errno = ESRCH;
-    bluebird_handle_error();
 
     return -1;
 }
 
 static int bluebird_ptrace_stop(pid_t pid)
 {
-    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) {
-        bluebird_handle_error();
+    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) 
         return -1;
-    }
 
     bluebird_sleep();
 
     if (bluebird_ptrace_wait(pid) < 0) {
         errno = ESRCH;
-        bluebird_handle_error();
         return -1;
     }
 
@@ -118,10 +114,8 @@ static bool is_stopped(pid_t pid)
     snprintf(proc_pid_path, PATH_MAX, "/proc/%d/status", pid);
 
     FILE *fobj = fopen(proc_pid_path, "r");
-    if (!fobj) {
-        bluebird_handle_error();
+    if (!fobj) 
         return false;
-    }
 
     size_t n_bytes = 0;
     char *fobj_ln = NULL;
@@ -145,7 +139,7 @@ long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid,
 {
     int stopped = 0;
 
-    if (req != PTRACE_ATTACH && !is_stopped(pid))
+    if (req != PTRACE_ATTACH && !is_stopped(pid)) 
         stopped = bluebird_ptrace_stop(pid);
 
     if (stopped < 0) 
@@ -153,10 +147,8 @@ long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid,
 
     long ptrace_ret = ptrace(req, pid, addr, data);
 
-    if (ptrace_ret < 0) {
-        bluebird_handle_error();
+    if (ptrace_ret < 0) 
         return -1;
-    }
 
     /* XXX debug
     PyObject *str = NULL;
@@ -269,10 +261,31 @@ static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
 
     return calls;
 
-    error:
-        bluebird_handle_error();
+error:
+    free(calls);
 
     return NULL;
+}
+
+struct find_call_thr_args {
+    pid_t pid;
+    int call;
+};
+
+static void find_call(struct find_call_thr_args *find_args)
+{
+    int *current_call = NULL;
+
+    bluebird_ptrace_call(PTRACE_ATTACH, find_args->pid, 0, 0);
+    bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0);
+
+    while (!current_call || *current_call != find_args->call) {
+        current_call = get_syscalls(find_args->pid, 1, false);
+        if (!current_call) 
+            bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0);
+    }
+
+    bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
 }
 
 static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
@@ -283,18 +296,17 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ii", &pid, &call))
         return NULL;
 
-    // XXX use a timeout instead of infinite loop 
-    while (true) {
+    // XXX add a timeout option
+    Py_BEGIN_ALLOW_THREADS
 
-        int *current_call = get_syscalls(pid, 1, false);
+    struct find_call_thr_args find_args = { pid, call };
+    pthread_t find_call_thread;
+    pthread_create(&find_call_thread, NULL, (void *) find_call, 
+                                            (void *) &find_args); 
+    pthread_join(find_call_thread, NULL);
 
-        if (!current_call)
-            bluebird_handle_error();    
-        else if (*current_call != call)
-            bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0);
-        else 
-            Py_RETURN_NONE;
-    }    
+    Py_END_ALLOW_THREADS
+    Py_RETURN_NONE;
 }
 
 static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
