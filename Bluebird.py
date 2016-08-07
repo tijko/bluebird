@@ -75,17 +75,17 @@ class Bluebird(object):
         # syscalls without allowing any calls to slip by
         return get_syscalls(self.traced_pid, nsyscalls)
 
-    def get_call(self, call, non_blocking=False, timeout=None):
+    def get_call(self, call, non_blocking=False, timeout=0):
         if non_blocking:
             if self.tracing:
                 raise RunningTrace
             self.stop()
             sleep(1)
             trace_thread = TracingThread(self, find_syscall, None,
-                                         self.traced_pid, call)
+                                         self.traced_pid, call, timeout, 1)
             trace_thread.start()
         else:    
-            return find_syscall(self.traced_pid, call)
+            find_syscall(self.traced_pid, call, timeout, 0)
 
     def dump_exec(self):
         pass
