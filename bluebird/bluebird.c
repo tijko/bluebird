@@ -114,7 +114,7 @@ static bool is_stopped(pid_t pid)
     snprintf(proc_pid_path, PATH_MAX, "/proc/%d/status", pid);
 
     FILE *fobj = fopen(proc_pid_path, "r");
-    // check errno if false
+
     if (!fobj) 
         return false;
 
@@ -278,20 +278,27 @@ struct find_call_thr_args {
     int call;
 };
 
-static void find_call(struct find_call_thr_args *find_args)
+static int *find_call(struct find_call_thr_args *find_args)
 {
     int *current_call = NULL;
-    if (bluebird_ptrace_call(PTRACE_ATTACH, find_args->pid, 0, 0) < 0)
-        return;
+    int *find_exit_status = malloc(sizeof(int));
+    *find_exit_status = -1;
+
+    if (bluebird_ptrace_call(PTRACE_ATTACH, find_args->pid, 0, 0) < 0) 
+        return find_exit_status;
 
     while (!current_call || *current_call != find_args->call) {
         current_call = get_syscalls(find_args->pid, 1, false);
         if (!current_call) 
-            bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0);
-            // check errno
+            if (bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0)
+                return find_exit_status;
     }
 
     bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
+
+    *find_exit_status = 0;
+
+    return find_exit_status;
 }
 
 static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
@@ -303,14 +310,24 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
         return NULL;
 
     // XXX add a timeout option
+    void *find_exit_status;
     Py_BEGIN_ALLOW_THREADS
     struct find_call_thr_args find_args = { pid, call };
     pthread_t find_call_thread;
     pthread_create(&find_call_thread, NULL, (void *) find_call, 
                                             (void *) &find_args); 
-    pthread_join(find_call_thread, NULL);
 
+    pthread_join(find_call_thread, &find_exit_status);
     Py_END_ALLOW_THREADS
+
+    if (*(int *) find_exit_status < 0) {
+        free(find_exit_status);
+        bluebird_handle_error();
+        return NULL;
+    }
+  
+    free(find_exit_status);
+
     Py_RETURN_NONE;
 }
 
