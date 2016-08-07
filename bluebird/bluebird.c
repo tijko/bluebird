@@ -9,7 +9,7 @@
 #include <sys/user.h>
 #include <sys/select.h>
 #include <sys/ptrace.h>
-//
+
 #include <pthread.h>
 
 /* The read would segfault the bird.  Check the input extra inspection. */
@@ -273,25 +273,33 @@ error:
     return NULL;
 }
 
-struct find_call_thr_args {
+struct find_call_args {
     pid_t pid;
     int call;
+    int timeout;
 };
 
-static int *find_call(struct find_call_thr_args *find_args)
+static int *find_call(struct find_call_args *find_args)
 {
     int *current_call = NULL;
     int *find_exit_status = malloc(sizeof(int));
     *find_exit_status = -1;
 
-    if (bluebird_ptrace_call(PTRACE_ATTACH, find_args->pid, 0, 0) < 0) 
-        return find_exit_status;
-
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_t start = ts.tv_sec;
+        
     while (!current_call || *current_call != find_args->call) {
         current_call = get_syscalls(find_args->pid, 1, false);
         if (!current_call) 
             if (bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0)
                 return find_exit_status;
+
+        if (find_args->timeout > 0) {
+            clock_gettime(CLOCK_REALTIME, &ts);
+            if ((ts.tv_sec - start) > find_args->timeout)
+                break;
+        }
     }
 
     bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
@@ -304,21 +312,31 @@ static int *find_call(struct find_call_thr_args *find_args)
 static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
 {
     pid_t pid;
-    int call;
+    int call, timeout, threaded;
 
-    if (!PyArg_ParseTuple(args, "ii", &pid, &call))
+    if (!PyArg_ParseTuple(args, "iiii", &pid, &call, &timeout, &threaded))
         return NULL;
 
-    // XXX add a timeout option
     void *find_exit_status;
-    Py_BEGIN_ALLOW_THREADS
-    struct find_call_thr_args find_args = { pid, call };
-    pthread_t find_call_thread;
-    pthread_create(&find_call_thread, NULL, (void *) find_call, 
-                                            (void *) &find_args); 
+    struct find_call_args find_args = { pid, call, timeout };
 
-    pthread_join(find_call_thread, &find_exit_status);
-    Py_END_ALLOW_THREADS
+    if (threaded) {
+        if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) {
+            bluebird_handle_error();
+            return NULL;
+        } 
+
+        Py_BEGIN_ALLOW_THREADS
+        pthread_t find_call_thread;
+        pthread_create(&find_call_thread, NULL, (void *) find_call, 
+                                                (void *) &find_args); 
+
+        pthread_join(find_call_thread, &find_exit_status);
+        Py_END_ALLOW_THREADS
+    } else {
+        find_exit_status = find_call(&find_args);
+    }
+        
 
     if (*(int *) find_exit_status < 0) {
         free(find_exit_status);
