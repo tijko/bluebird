@@ -114,6 +114,7 @@ static bool is_stopped(pid_t pid)
     snprintf(proc_pid_path, PATH_MAX, "/proc/%d/status", pid);
 
     FILE *fobj = fopen(proc_pid_path, "r");
+    // check errno if false
     if (!fobj) 
         return false;
 
@@ -222,13 +223,18 @@ static PyObject *bluebird_readint(PyObject *self, PyObject *args)
     return Py_BuildValue("i", read_int);
 }
 
-static inline void set_syscall(pid_t pid)
+static int set_syscall(pid_t pid)
 {
-    bluebird_ptrace_call(PTRACE_SYSCALL, pid, 0, 0);
+    int ret = bluebird_ptrace_call(PTRACE_SYSCALL, pid, 0, 0);
+
+    if (ret < 0)
+        return -1;
 
     int status;
 
     waitpid(pid, &status, __WALL);
+
+    return 0;
 }
 
 static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
@@ -241,8 +247,8 @@ static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
         return NULL;
 
     while (syscalls_made < nsyscalls) {
-
-        set_syscall(pid);
+        if (set_syscall(pid) < 0)
+            goto error;
 
         if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
             goto error;
@@ -275,14 +281,14 @@ struct find_call_thr_args {
 static void find_call(struct find_call_thr_args *find_args)
 {
     int *current_call = NULL;
-
-    bluebird_ptrace_call(PTRACE_ATTACH, find_args->pid, 0, 0);
-    bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0);
+    if (bluebird_ptrace_call(PTRACE_ATTACH, find_args->pid, 0, 0) < 0)
+        return;
 
     while (!current_call || *current_call != find_args->call) {
         current_call = get_syscalls(find_args->pid, 1, false);
         if (!current_call) 
             bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0);
+            // check errno
     }
 
     bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
@@ -298,7 +304,6 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
 
     // XXX add a timeout option
     Py_BEGIN_ALLOW_THREADS
-
     struct find_call_thr_args find_args = { pid, call };
     pthread_t find_call_thread;
     pthread_create(&find_call_thread, NULL, (void *) find_call, 

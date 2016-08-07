@@ -81,7 +81,7 @@ class Bluebird(object):
             # check for another running thread
             self.stop()
             sleep(1)
-            trace_thread = TracingThread(self, find_syscall, None, 
+            trace_thread = TracingThread(self, find_syscall, None,
                                          self.traced_pid, call)
             trace_thread.start()
         else:    
@@ -123,7 +123,6 @@ class TracingThread(Thread):
         trace_results = self.trace_func(*self.args)
         self.trace_obj.tracing = False
         self.trace_obj.trace_results = trace_results
-        self.trace_obj.start()
 
 
 class RunningTraceError(BaseException):

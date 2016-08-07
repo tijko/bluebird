@@ -3,7 +3,6 @@
 
 import unittest
 
-#from bluebird import *
 from Bluebird import Bluebird
 
 from time import sleep
@@ -25,14 +24,8 @@ class BlueBirdTest(unittest.TestCase):
     def create_test_proc(self, stdout=PIPE):
         self.test_proc = Popen('./alt_print', stdout=stdout)
         self.test_proc_pid = self.test_proc.pid
-
-    def create_bluebird(self):
         self.bluebird = Bluebird(self.test_proc_pid)
         self.bluebird.start()
-
-    def setUp(self):
-        self.create_test_proc()
-        self.create_bluebird()
 
     def tearDown(self):
         if self.test_proc.stdout is not None:
@@ -40,14 +33,16 @@ class BlueBirdTest(unittest.TestCase):
         self.test_proc.kill()
         
     def test_attach(self):
+        # XXX stop all running processes started
         number_of_attaches = 10
         for _ in range(number_of_attaches):
             self.create_test_proc()
-            self.bluebird = Bluebird(self.test_proc_pid)
-            self.bluebird.start()
             tracer_pid = parse_proc_status(self.test_proc_pid)
             self.assertEqual(test_pid, tracer_pid)
             # allow for cleanup of resources
+            if self.test_proc.stdout is not None:
+                self.test_proc.stdout.close()
+            self.test_proc.kill()
             sleep(0.4)
             
     def test_writestring(self):
@@ -58,12 +53,10 @@ class BlueBirdTest(unittest.TestCase):
         test_proc_filename = 'alt_print.txt'
         test_proc_file = open(test_proc_filename, 'x')
         self.create_test_proc(stdout=test_proc_file)
+        sleep(1)
         test_proc_output = 'Process <{}> is running!'.format(self.test_proc_pid)
         test_proc_newoutput = '{} <{}> is running!'.format(test_proc_word, 
                                                            self.test_proc_pid)
-#XXX        
-        self.bluebird = Bluebird(self.test_proc_pid)
-        self.bluebird.start()
         self.bluebird.write(test_proc_addr, test_proc_word)
         sleep(2)
         test_proc_file.close()
@@ -79,39 +72,45 @@ class BlueBirdTest(unittest.TestCase):
     def test_readstring(self):
         # XXX using address from objdump -s alt_print
         # find a way to universally calculate address reading the binary
+        self.create_test_proc()
+        sleep(1)
         test_proc_addr = 0x400754
         test_proc_word = 'Process'
         word = self.bluebird.read(test_proc_addr, 1)
         self.assertEqual(test_proc_word, word)
       
     def test_get_syscall(self):
+        self.create_test_proc()
         sleep(1)
         syscall = self.bluebird.get_current_call()
         self.assertIn(syscall, test_proc_syscalls)
 
     def test_get_syscalls(self):
+        self.create_test_proc()
         sleep(1)
         test_syscalls = self.bluebird.get_ranged_syscalls(4)
         calls = test_proc_syscalls * 2 
         self.assertCountEqual(test_syscalls, calls)
-
+    
     def test_find_syscall(self):
-        getsid = 124
-        test_find = self.bluebird.get_call(getsid)
-        self.assertIsNone(test_find)
-
-    def test_detach(self):
-        test_proc = Popen('./alt_print', stdout=PIPE)
+        self.create_test_proc()
         sleep(1)
-        self.bluebird = Bluebird(self.test_proc_pid)
-        self.bluebird.start()
+        getsid = 124
+        test_find = self.bluebird.get_call(getsid, non_blocking=True)
+        while self.bluebird.tracing:
+            sleep(1)
+        self.assertIsNone(test_find)
+   
+    def test_detach(self):
+        self.create_test_proc()
+        sleep(1)
         tracer_pid = parse_proc_status(self.test_proc_pid)
         self.assertEqual(test_pid, tracer_pid)
         self.bluebird.stop()
         sleep(1)
         tracer_pid = parse_proc_status(self.test_proc_pid)
         self.assertEqual(0, tracer_pid)
-
+    
 if __name__ == '__main__':
     # XXX these syscalls are defined in /usr/include/asm/unistd_64.h
     # rewrite to allow compatibility for 32 too.
