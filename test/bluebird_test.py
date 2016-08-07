@@ -91,7 +91,7 @@ class BlueBirdTest(unittest.TestCase):
         test_syscalls = self.bluebird.get_ranged_syscalls(4)
         calls = test_proc_syscalls * 2 
         self.assertCountEqual(test_syscalls, calls)
-    
+     
     def test_find_syscall(self):
         self.create_test_proc()
         sleep(1)
@@ -99,6 +99,13 @@ class BlueBirdTest(unittest.TestCase):
         test_find = self.bluebird.get_call(getsid, non_blocking=True)
         while self.bluebird.tracing:
             sleep(1)
+        self.assertIsNone(test_find)
+    
+    def test_find_syscall_timeout(self):
+        self.create_test_proc()
+        sleep(1)
+        foo_syscall = 404
+        test_find = self.bluebird.get_call(foo_syscall, timeout=5)
         self.assertIsNone(test_find)
    
     def test_detach(self):
