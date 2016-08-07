@@ -75,17 +75,17 @@ class Bluebird(object):
         # syscalls without allowing any calls to slip by
         return get_syscalls(self.traced_pid, nsyscalls)
 
-    # halts process at entrance to syscall
-    def get_call(self, call, non_blocking=False, timeout=None):
+    def get_call(self, call, non_blocking=False, timeout=0):
         if non_blocking:
-            # check for another running thread
+            if self.tracing:
+                raise RunningTrace
             self.stop()
             sleep(1)
             trace_thread = TracingThread(self, find_syscall, None,
-                                         self.traced_pid, call)
+                                         self.traced_pid, call, timeout, 1)
             trace_thread.start()
         else:    
-            return find_syscall(self.traced_pid, call)
+            find_syscall(self.traced_pid, call, timeout, 0)
 
     def dump_exec(self):
         pass
@@ -120,9 +120,13 @@ class TracingThread(Thread):
 
     def run(self):
         self.trace_obj.tracing = True
-        trace_results = self.trace_func(*self.args)
-        self.trace_obj.tracing = False
-        self.trace_obj.trace_results = trace_results
+        try:
+            trace_results = self.trace_func(*self.args)
+        except:
+            trace_results = None
+        finally:
+            self.trace_obj.tracing = False
+            self.trace_obj.trace_results = trace_results
 
 
 class RunningTraceError(BaseException):
