@@ -101,7 +101,7 @@ static int bluebird_ptrace_stop(pid_t pid)
     if (bluebird_ptrace_wait(pid) < 0) {
         errno = ESRCH;
         return -1;
-    } 
+    }
 
     return 0;
 }
@@ -284,24 +284,16 @@ static void find_call(struct find_call_thr_args *find_args)
     if (bluebird_ptrace_call(PTRACE_ATTACH, find_args->pid, 0, 0) < 0)
         return;
 
-    //sleep(1);
-    //bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0);
-
     while (!current_call || *current_call != find_args->call) {
         current_call = get_syscalls(find_args->pid, 1, false);
         if (!current_call) 
             bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0);
-        // check errno
+            // check errno
     }
 
     bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
 }
 
-// non-thread find_syscall
-//static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
-//{
-//    pid_t pid;
-//}
 static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
 {
     pid_t pid;
