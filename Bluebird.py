@@ -33,6 +33,7 @@ class Bluebird(object):
         self.rstrs = {}
         self.attached = False
         self.tracing = False
+        self.heap_bounds = self.get_heap(pid)
         # set attached pid COMM
 
     def start(self):
@@ -54,6 +55,19 @@ class Bluebird(object):
         if str(self.pid) != field[1]:
             return False
         return True
+        
+    def get_heap(self, pid):
+        with open('/proc/{}/maps'.format(pid)) as fh:
+            raw_map_data = fh.read()
+        if raw_map_data.find('heap') == -1: return None
+        for _map in raw_map_data.split('\n'):
+            if 'heap' in _map: break
+        return self.parse_heap_map(_map)
+
+    def parse_heap_map(self, heap_map):
+        address_range = heap_map.split()[0]
+        start, stop = address_range.split('-')
+        return int(start, 16), int(stop, 16)
  
     def write(self, addr, data):
         if isinstance(data, int):
@@ -94,9 +108,13 @@ class Bluebird(object):
         #make_call(getcwd)
         pass
 
-    def sbrk(self, amount):
-        #make_call(sbrk, amount)
-        pass
+    def expand_heap(self, amount):
+        if self.heap_bounds is None:
+            print('Unavailable')
+            return
+        start = self.heap_bounds[0]
+        new_bounds = self.heap_bounds[1] + amount
+        bbrk(self.traced_pid, new_bounds, start)
 
     def name(self):
         status = self._parse_status()

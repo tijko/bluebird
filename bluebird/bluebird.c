@@ -223,9 +223,9 @@ static PyObject *bluebird_readint(PyObject *self, PyObject *args)
     return Py_BuildValue("i", read_int);
 }
 
-static int set_syscall(pid_t pid)
+static int set_step(pid_t pid, enum __ptrace_request step)
 {
-    int ret = bluebird_ptrace_call(PTRACE_SYSCALL, pid, 0, 0);
+    int ret = bluebird_ptrace_call(step, pid, 0, 0);
 
     if (ret < 0)
         return -1;
@@ -247,7 +247,7 @@ static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
         return NULL;
 
     while (syscalls_made < nsyscalls) {
-        if (set_syscall(pid) < 0)
+        if (set_step(pid, PTRACE_SYSCALL) < 0)
             goto error;
 
         if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
@@ -543,6 +543,105 @@ static PyObject *bluebird_signal(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+static int find_syscall_exit(pid_t pid)
+{
+    struct user_regs_struct rg;
+
+    while ( 1 ) {
+
+        if (set_step(pid, PTRACE_SYSCALL) < 0) 
+            return -1;
+
+        if (ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0) 
+            return -1;
+        else if (rg.orig_rax == 219)
+            break;
+    }
+
+    return 0;
+}
+
+static struct user_regs_struct *set_rip_local(pid_t pid, long heap)
+{
+    struct user_regs_struct *rg = malloc(sizeof *rg);
+
+    while ( 1 ) {
+
+        if (set_step(pid, PTRACE_SINGLESTEP) < 0) {
+            bluebird_handle_error();
+            return NULL;
+        }
+
+        if (ptrace(PTRACE_GETREGS, pid, 0, rg) < 0) {
+            bluebird_handle_error();
+            return NULL;
+        } else if (rg->rip < heap)
+            break;
+    }
+
+    return rg;
+}
+
+static PyObject *bluebird_bbrk(PyObject *self, PyObject *args)
+{
+    int pid;
+
+    long addr, heap;
+
+    if (!PyArg_ParseTuple(args, "ill", &pid, &addr, &heap)) 
+        return NULL;
+
+    if (find_syscall_exit(pid) < 0)
+        bluebird_handle_error();
+
+    struct user_regs_struct *orig_regs = set_rip_local(pid, heap);
+    struct user_regs_struct rg;
+
+    while ( 1 ) {
+
+        if (set_step(pid, PTRACE_SYSCALL) < 0) {
+            bluebird_handle_error();
+            return NULL;
+        }
+
+        if (ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0) {
+            bluebird_handle_error();
+            return NULL;
+        }
+
+        if (rg.orig_rax == 219) continue;
+
+        if (ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 12) < 0) {
+            bluebird_handle_error();
+            return NULL;
+        }
+
+        if (ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0) {
+            bluebird_handle_error();
+            return NULL;
+        }
+
+        break;
+    }
+
+    if (set_step(pid, PTRACE_SYSCALL) < 0) {
+        bluebird_handle_error();
+        return NULL;
+    }
+
+    if (ptrace(PTRACE_SETREGS, pid, 0, orig_regs) < 0) {
+        bluebird_handle_error();
+        return NULL;
+    }
+
+    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
+        bluebird_handle_error();
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
 static PyObject *bluebird_attach(PyObject *self, PyObject *args)
 {
     pid_t pid;
@@ -603,6 +702,8 @@ static PyMethodDef bluebirdmethods[] = {
      "writes string to process address"},
     {"signal", bluebird_signal, METH_VARARGS,
      "allows for signal sending to attached process"},
+    {"bbrk", bluebird_bbrk, METH_VARARGS,
+     "allows for bluebird to extend the heap by means of brk"},
     {NULL, NULL, 0, NULL}
 };
 
