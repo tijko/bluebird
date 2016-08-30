@@ -223,7 +223,7 @@ static PyObject *bluebird_readint(PyObject *self, PyObject *args)
     return Py_BuildValue("i", read_int);
 }
 
-static int set_step(pid_t pid, enum __ptrace_request step)
+static int set_sys_step(pid_t pid, enum __ptrace_request step)
 {
     int ret = bluebird_ptrace_call(step, pid, 0, 0);
 
@@ -247,7 +247,7 @@ static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
         return NULL;
 
     while (syscalls_made < nsyscalls) {
-        if (set_step(pid, PTRACE_SYSCALL) < 0)
+        if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
             goto error;
 
         if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
@@ -549,7 +549,7 @@ static int find_syscall_exit(pid_t pid)
 
     while ( 1 ) {
 
-        if (set_step(pid, PTRACE_SYSCALL) < 0) 
+        if (set_sys_step(pid, PTRACE_SYSCALL) < 0) 
             return -1;
 
         if (ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0) 
@@ -567,7 +567,7 @@ static struct user_regs_struct *set_rip_local(pid_t pid, long heap)
 
     while ( 1 ) {
 
-        if (set_step(pid, PTRACE_SINGLESTEP) < 0) {
+        if (set_sys_step(pid, PTRACE_SINGLESTEP) < 0) {
             bluebird_handle_error();
             return NULL;
         }
@@ -580,6 +580,38 @@ static struct user_regs_struct *set_rip_local(pid_t pid, long heap)
     }
 
     return rg;
+}
+
+static int find_syscall_entrance(pid_t pid)
+{
+    struct user_regs_struct rg;
+
+    while ( 1 ) {
+
+        if (set_sys_step(pid, PTRACE_SYSCALL) < 0 ||
+            ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0) 
+            goto error;
+
+        if (rg.orig_rax == 219) continue;
+
+        return 0;
+    }
+
+error:
+    bluebird_handle_error();
+    return -1;
+}
+
+static int reset_ip(pid_t pid, struct user_regs_struct *rg)
+{
+    if (set_sys_step(pid, PTRACE_SYSCALL) < 0 || 
+        ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
+        bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
+        bluebird_handle_error();
+        return -1;
+    }
+
+    return 0;
 }
 
 static PyObject *bluebird_bbrk(PyObject *self, PyObject *args)
@@ -595,49 +627,22 @@ static PyObject *bluebird_bbrk(PyObject *self, PyObject *args)
         bluebird_handle_error();
 
     struct user_regs_struct *orig_regs = set_rip_local(pid, heap);
-    struct user_regs_struct rg;
 
-    while ( 1 ) {
+    if (find_syscall_entrance(pid) < 0)
+        return NULL;
 
-        if (set_step(pid, PTRACE_SYSCALL) < 0) {
-            bluebird_handle_error();
-            return NULL;
-        }
-
-        if (ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0) {
-            bluebird_handle_error();
-            return NULL;
-        }
-
-        if (rg.orig_rax == 219) continue;
-
-        if (ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 12) < 0) {
-            bluebird_handle_error();
-            return NULL;
-        }
-
-        if (ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0) {
-            bluebird_handle_error();
-            return NULL;
-        }
-
-        break;
-    }
-
-    if (set_step(pid, PTRACE_SYSCALL) < 0) {
+    if (ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 12) < 0) {
         bluebird_handle_error();
         return NULL;
     }
 
-    if (ptrace(PTRACE_SETREGS, pid, 0, orig_regs) < 0) {
+    if (ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0) {
         bluebird_handle_error();
         return NULL;
     }
 
-    if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
-        bluebird_handle_error();
+    if (reset_ip(pid, orig_regs) < 0)
         return NULL;
-    }
 
     Py_RETURN_NONE;
 }
