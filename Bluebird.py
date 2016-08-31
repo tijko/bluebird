@@ -7,6 +7,10 @@ from os import getpid
 from time import sleep
 from threading import Thread
 
+from mmap import PROT_EXEC, PROT_READ, PROT_WRITE, \
+           MAP_PRIVATE, MAP_ANONYMOUS, MAP_SHARED, \
+           MAP_DENYWRITE, MAP_EXECUTABLE, PAGESIZE
+
 
 class TraceResults(object):
 
@@ -110,11 +114,16 @@ class Bluebird(object):
 
     def expand_heap(self, amount):
         if self.heap_bounds is None:
-            print('Unavailable')
-            return
+            raise NoHeapAddress    
         start = self.heap_bounds[0]
         new_bounds = self.heap_bounds[1] + amount
         bbrk(self.traced_pid, new_bounds, start)
+
+    def create_mmap(self, addr, length, prot, flags, offset):
+        if self.heap_bounds is None:
+            raise NoHeapAddress    
+        heap = self.heap_bounds[1]
+        bmmap(self.traced_pid, addr, length, prot, flags, offset, heap)
 
     def name(self):
         status = self._parse_status()
@@ -151,3 +160,9 @@ class RunningTraceError(BaseException):
 
     def __str__(self):
         return 'Trace in progress'
+
+
+class NoHeapAddress(BaseException):
+
+    def __str__(self):
+        return 'Process has no available heap address'
