@@ -730,19 +730,17 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
 
 
     if (find_syscall_entrance(pid) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, RAX * WORD, 0) ||
         ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 9) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RSI * WORD, length) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDX * WORD, prot) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RCX * WORD, flags) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, R8 * WORD, fd_map) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, R9 * WORD, offset) < 0)
-        goto error;
-    // get resulting address from rax
-    if (set_sys_step(pid, PTRACE_SYSCALL) < 0 || 
+        ptrace(PTRACE_POKEUSER, pid, R9 * WORD, offset) < 0 ||
         reset_ip(pid, orig_regs) < 0)
         goto error;
+
+    // get resulting address from rax
     
     free(orig_regs);
 
