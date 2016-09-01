@@ -1,5 +1,6 @@
 #include <Python.h>
 
+#include <fcntl.h>
 #include <sched.h>
 #include <signal.h>
 #include <unistd.h>
@@ -590,13 +591,52 @@ static int find_syscall_entrance(pid_t pid)
 
 static int reset_ip(pid_t pid, struct user_regs_struct *rg)
 {
-    if (set_sys_step(pid, PTRACE_SYSCALL) < 0 || 
-        ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
+    if (ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
         bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
         return -1;
     }
 
     return 0;
+}
+
+static long set_break(pid_t pid, long addr, long heap)
+{
+    struct user_regs_struct *orig_regs = NULL;
+
+    if (find_syscall_exit(pid) < 0)
+        return -1;
+
+    orig_regs = set_rip_local(pid, heap);
+
+    if (orig_regs == NULL)
+        goto error;
+
+    if (find_syscall_entrance(pid) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 12) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0)
+        goto error;
+
+
+    if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
+        goto error;
+
+    struct user_regs_struct rg;
+    ptrace(PTRACE_GETREGS, pid, 0, &rg);
+    if (rg.rax < 0 || reset_ip(pid, orig_regs) < 0)
+        goto error;
+
+    free(orig_regs);
+
+    return 0;
+
+error:
+
+    if (orig_regs != NULL)
+        free(orig_regs);
+
+    bluebird_handle_error();
+
+    return -1;
 }
 
 static PyObject *bluebird_bbrk(PyObject *self, PyObject *args)
@@ -608,34 +648,48 @@ static PyObject *bluebird_bbrk(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ill", &pid, &addr, &heap)) 
         return NULL;
 
+    if (set_break(pid, addr, heap) < 0) {
+        bluebird_handle_error();
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
+static int open_file(pid_t pid, long heap)
+{
     struct user_regs_struct *orig_regs = NULL;
 
     if (find_syscall_exit(pid) < 0)
-        goto error;
-
+        return -1;
+ 
     orig_regs = set_rip_local(pid, heap);
 
     if (orig_regs == NULL)
-        goto error;
+        return -1;
 
     if (find_syscall_entrance(pid) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 12) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0 ||
-        reset_ip(pid, orig_regs) < 0)
-        goto error;
+        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 2) ||
+        ptrace(PTRACE_POKEUSER, pid, RDI * WORD, heap) < 0||
+        ptrace(PTRACE_POKEUSER, pid, RSI * WORD, O_CREAT | O_WRONLY) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, RDX * WORD, S_IXUSR | S_IWUSR) < 0)
+        return -1;
+
+    if (set_sys_step(pid, PTRACE_SYSCALL) < 0) 
+        return -1;
+
+    struct user_regs_struct rg;
+    if (ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0)
+        return -1;
+
+    int fd = rg.rax;
+
+    if (reset_ip(pid, orig_regs) < 0)
+        return -1;
 
     free(orig_regs);
 
-    Py_RETURN_NONE;
-
-error:
-
-    if (orig_regs != NULL)
-        free(orig_regs);
-
-    bluebird_handle_error();
-
-    return NULL;
+    return fd;
 }
 
 static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
@@ -649,6 +703,23 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
 
     struct user_regs_struct *orig_regs = NULL;
 
+    if (set_break(pid, heap, heap + 0xffff) < 0)
+        goto error;
+
+    char *map_file_path = "/tmp/bluebird";
+
+    long *path_words = create_wordsize_array(map_file_path);
+    long heap_addr = heap - ((strlen(map_file_path) + 1) * WORD);
+    long curr_addr = heap_addr;
+    for (int i=0; path_words[i] != 0; i++, curr_addr+=WORD) {
+        if (bluebird_write(pid, curr_addr, path_words[i]) < 0)
+            goto error;
+    } 
+
+    int fd_map = open_file(pid, heap_addr);
+    if (fd_map < 0)
+        goto error;
+
     if (find_syscall_exit(pid) < 0)
        goto error;
  
@@ -657,6 +728,7 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
     if (orig_regs == NULL)
         goto error;
 
+
     if (find_syscall_entrance(pid) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RAX * WORD, 0) ||
         ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 9) < 0 ||
@@ -664,12 +736,13 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
         ptrace(PTRACE_POKEUSER, pid, RSI * WORD, length) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDX * WORD, prot) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RCX * WORD, flags) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, R8 * WORD, ~0) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, R9 * WORD, offset) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, R8 * WORD, fd_map) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, R9 * WORD, offset) < 0)
+        goto error;
+    // get resulting address from rax
+    if (set_sys_step(pid, PTRACE_SYSCALL) < 0 || 
         reset_ip(pid, orig_regs) < 0)
         goto error;
-
-    // get resulting address from rax
     
     free(orig_regs);
 
