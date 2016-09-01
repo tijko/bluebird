@@ -106,8 +106,6 @@ static int bluebird_ptrace_stop(pid_t pid)
     return 0;
 }
 
-//static int bluebird_continue(pid_t pid) { return 0; }
-
 static bool is_stopped(pid_t pid)
 {
     char proc_pid_path[PATH_MAX + 1];
@@ -317,14 +315,12 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "iiii", &pid, &call, &timeout, &threaded))
         return NULL;
 
-    void *find_exit_status;
+    void *find_exit_status = NULL;
     struct find_call_args find_args = { pid, call, timeout };
 
     if (threaded) {
-        if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) {
-            bluebird_handle_error();
-            return NULL;
-        } 
+        if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
+            goto error;
 
         Py_BEGIN_ALLOW_THREADS
         pthread_t find_call_thread;
@@ -333,20 +329,21 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
 
         pthread_join(find_call_thread, &find_exit_status);
         Py_END_ALLOW_THREADS
-    } else {
+    } else 
         find_exit_status = find_call(&find_args);
-    }
         
-
-    if (*(int *) find_exit_status < 0) {
-        free(find_exit_status);
-        bluebird_handle_error();
-        return NULL;
-    }
+    if (*(int *) find_exit_status < 0) 
+        goto error;
   
     free(find_exit_status);
-
     Py_RETURN_NONE;
+
+error:
+    if (find_exit_status)
+        free(find_exit_status);
+        
+    bluebird_handle_error();
+    return NULL;
 }
 
 static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
@@ -394,8 +391,6 @@ static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
 
     return call_list;
 }
-
-// POKE_USER
 
 static PyObject *bluebird_resume(PyObject *self, PyObject *args)
 {
