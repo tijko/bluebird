@@ -120,11 +120,11 @@ class Bluebird(object):
         bbrk(self.traced_pid, new_bounds, start)
         self.heap_bounds = self.get_heap(self.traced_pid)
 
-    def create_mmap(self, addr, length, prot, flags, offset):
+    def create_mmap(self, addr, length, prot, flags, offset, path=None):
         if self.heap_bounds is None:
             raise NoHeapAddress    
         heap = self.heap_bounds[1]
-        bmmap(self.traced_pid, addr, length, prot, flags, offset, heap)
+        bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, path)
         self.heap_bounds = self.get_heap(self.traced_pid)
 
     def name(self):

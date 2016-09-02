@@ -692,37 +692,44 @@ static int open_file(pid_t pid, long heap)
     return fd;
 }
 
+static int create_mmap_file(pid_t pid, char *path, long heap)
+{
+    if (set_break(pid, heap, heap + 0xffff) < 0)
+        return -1;
+
+    long *path_words = create_wordsize_array(path);
+    long heap_addr = heap - ((strlen(path) + 1) * WORD);
+    long curr_addr = heap_addr;
+
+    for (int i=0; path_words[i] != 0; i++, curr_addr+=WORD) 
+        if (bluebird_write(pid, curr_addr, path_words[i]) < 0)
+            return -1;
+
+    int fd_map = open_file(pid, heap_addr);
+
+    if (fd_map < 0 || find_syscall_exit(pid) < 0)
+        return -1;
+
+    return fd_map;
+}
+
 static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
 {
     long addr, length, heap;
     int pid, prot, flags, offset;
+    char *path;
 
-    if (!PyArg_ParseTuple(args, "illiiil", &pid, &addr, &length, &prot,
-                                           &flags, &offset, &heap))
+    if (!PyArg_ParseTuple(args, "illiiilz", &pid, &addr, &length, &prot,
+                                            &flags, &offset, &heap, &path))
         return NULL;
 
     struct user_regs_struct *orig_regs = NULL;
 
-    if (set_break(pid, heap, heap + 0xffff) < 0)
-        goto error;
+    int fd = -1;
 
-    char *map_file_path = "/tmp/bluebird";
-
-    long *path_words = create_wordsize_array(map_file_path);
-    long heap_addr = heap - ((strlen(map_file_path) + 1) * WORD);
-    long curr_addr = heap_addr;
-    for (int i=0; path_words[i] != 0; i++, curr_addr+=WORD) {
-        if (bluebird_write(pid, curr_addr, path_words[i]) < 0)
-            goto error;
-    } 
-
-    int fd_map = open_file(pid, heap_addr);
-    if (fd_map < 0)
-        goto error;
-
-    if (find_syscall_exit(pid) < 0)
-       goto error;
- 
+    if (path != NULL)
+        fd = create_mmap_file(pid, path, heap);
+        
     orig_regs = set_rip_local(pid, heap);
 
     if (orig_regs == NULL)
@@ -735,7 +742,7 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
         ptrace(PTRACE_POKEUSER, pid, RSI * WORD, length) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDX * WORD, prot) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RCX * WORD, flags) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, R8 * WORD, fd_map) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, R8 * WORD, fd) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, R9 * WORD, offset) < 0 ||
         reset_ip(pid, orig_regs) < 0)
         goto error;
