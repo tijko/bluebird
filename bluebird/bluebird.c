@@ -10,6 +10,7 @@
 #include <sys/user.h>
 #include <sys/select.h>
 #include <sys/ptrace.h>
+#include <sys/syscall.h>
 
 #include <pthread.h>
 
@@ -612,7 +613,7 @@ static long set_break(pid_t pid, long addr, long heap)
         goto error;
 
     if (find_syscall_entrance(pid) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 12) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, SYS_brk) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0)
         goto error;
 
@@ -669,7 +670,7 @@ static int open_file(pid_t pid, long heap)
         return -1;
 
     if (find_syscall_entrance(pid) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 2) ||
+        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, SYS_open) ||
         ptrace(PTRACE_POKEUSER, pid, RDI * WORD, heap) < 0||
         ptrace(PTRACE_POKEUSER, pid, RSI * WORD, O_CREAT | O_WRONLY) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDX * WORD, S_IXUSR | S_IWUSR) < 0)
@@ -737,13 +738,13 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
 
 
     if (find_syscall_entrance(pid) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, 9) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, ORIG_RAX * WORD, SYS_mmap) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDI * WORD, addr) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RSI * WORD, length) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, RDX * WORD, prot) < 0 ||
-        ptrace(PTRACE_POKEUSER, pid, RCX * WORD, flags) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, R8 * WORD, fd) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, R9 * WORD, offset) < 0 ||
+        ptrace(PTRACE_POKEUSER, pid, R10 * WORD, flags) < 0 ||
         reset_ip(pid, orig_regs) < 0)
         goto error;
 
