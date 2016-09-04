@@ -726,7 +726,7 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
 
     struct user_regs_struct *orig_regs = NULL;
 
-    int fd = -1;
+    int fd = 0;
 
     if (path != NULL)
         fd = create_mmap_file(pid, path, heap);
@@ -745,6 +745,7 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
         ptrace(PTRACE_POKEUSER, pid, R8 * WORD, fd) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, R9 * WORD, offset) < 0 ||
         ptrace(PTRACE_POKEUSER, pid, R10 * WORD, flags) < 0 ||
+        set_sys_step(pid, PTRACE_SYSCALL) < 0 ||
         reset_ip(pid, orig_regs) < 0)
         goto error;
 
