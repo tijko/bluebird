@@ -183,7 +183,7 @@ static PyObject *bluebird_readstring(PyObject *self, PyObject *args)
     unsigned long addr;
     int words_to_read;
 
-    if (!PyArg_ParseTuple(args, "iki", &pid, &addr, &words_to_read)) 
+    if (!PyArg_ParseTuple(args, "iki:readstring", &pid, &addr, &words_to_read)) 
         return NULL;
 
     char *words = malloc(sizeof(char) * (WORD * words_to_read) + 1);
@@ -212,7 +212,7 @@ static PyObject *bluebird_readint(PyObject *self, PyObject *args)
     pid_t pid;
     unsigned const long addr;
 
-    if (!PyArg_ParseTuple(args, "ik", &pid, &addr))
+    if (!PyArg_ParseTuple(args, "ik:readint", &pid, &addr))
         return NULL;
 
     long read_int = bluebird_read(pid, addr);
@@ -314,7 +314,8 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
     pid_t pid;
     int call, timeout, threaded;
 
-    if (!PyArg_ParseTuple(args, "iiii", &pid, &call, &timeout, &threaded))
+    if (!PyArg_ParseTuple(args, "iiii:find_syscall", 
+                          &pid, &call, &timeout, &threaded))
         return NULL;
 
     void *find_exit_status = NULL;
@@ -352,7 +353,7 @@ static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
 {
     pid_t pid;
 
-    if (!PyArg_ParseTuple(args, "i", &pid))
+    if (!PyArg_ParseTuple(args, "i:get_syscall", &pid))
         return NULL;
 
     int *call = get_syscalls(pid, 1, true);
@@ -373,7 +374,7 @@ static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
     pid_t pid;
     int nsyscalls;
 
-    if (!PyArg_ParseTuple(args, "ii", &pid, &nsyscalls))
+    if (!PyArg_ParseTuple(args, "ii:get_syscalls", &pid, &nsyscalls))
         return NULL;
 
     int *syscalls = get_syscalls(pid, nsyscalls, true);
@@ -398,7 +399,7 @@ static PyObject *bluebird_resume(PyObject *self, PyObject *args)
 {
     pid_t pid;
 
-    if (!PyArg_ParseTuple(args, "i", &pid))
+    if (!PyArg_ParseTuple(args, "i:resume", &pid))
         return NULL;
 
     int status;
@@ -460,7 +461,7 @@ static PyObject *bluebird_writeint(PyObject *self, PyObject *args)
     unsigned const long addr;
     const long wr_data;
 
-    if (!PyArg_ParseTuple(args, "ikl", &pid, &addr, &wr_data))
+    if (!PyArg_ParseTuple(args, "ikl:writeint", &pid, &addr, &wr_data))
         return NULL;
 
     long writeint = bluebird_write(pid, addr, wr_data);
@@ -477,7 +478,7 @@ static PyObject *bluebird_writestring(PyObject *self, PyObject *args)
     unsigned long addr;
     char *wr_data;
 
-    if (!PyArg_ParseTuple(args, "iks", &pid, &addr, &wr_data)) 
+    if (!PyArg_ParseTuple(args, "iks:writestring", &pid, &addr, &wr_data))
         return NULL;
 
     long *words = create_wordsize_array(wr_data);
@@ -531,7 +532,7 @@ static PyObject *bluebird_signal(PyObject *self, PyObject *args)
     int ptrace_signal; 
     pid_t pid;
 
-    if (!PyArg_ParseTuple(args, "ii", &pid, &ptrace_signal)) 
+    if (!PyArg_ParseTuple(args, "ii:signal", &pid, &ptrace_signal)) 
         return NULL;
 
     if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) 
@@ -646,7 +647,7 @@ static PyObject *bluebird_bbrk(PyObject *self, PyObject *args)
 
     long addr, heap;
 
-    if (!PyArg_ParseTuple(args, "ill", &pid, &addr, &heap)) 
+    if (!PyArg_ParseTuple(args, "ill:bbrk", &pid, &addr, &heap)) 
         return NULL;
 
     if (set_break(pid, addr, heap) < 0) {
@@ -720,8 +721,8 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
     int pid, prot, flags, offset;
     char *path;
 
-    if (!PyArg_ParseTuple(args, "illiiilz", &pid, &addr, &length, &prot,
-                                            &flags, &offset, &heap, &path))
+    if (!PyArg_ParseTuple(args, "illiiilz:bmmap", &pid, &addr, &length, &prot,
+                                               &flags, &offset, &heap, &path))
         return NULL;
 
     struct user_regs_struct *orig_regs = NULL;
@@ -775,7 +776,7 @@ static PyObject *bluebird_attach(PyObject *self, PyObject *args)
         return NULL;
     }
 
-    if (!PyArg_ParseTuple(args, "i", &pid)) 
+    if (!PyArg_ParseTuple(args, "i:attach", &pid)) 
         return NULL;
 
     if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) {
@@ -793,7 +794,7 @@ static PyObject *bluebird_detach(PyObject *self, PyObject *args)
 {
     pid_t pid;
         
-    if (!PyArg_ParseTuple(args, "i", &pid)) 
+    if (!PyArg_ParseTuple(args, "i:detach", &pid)) 
         return NULL;
 
     if (bluebird_ptrace_call(PTRACE_DETACH, pid, 0, 0) < 0)
