@@ -5,18 +5,18 @@ import unittest
 
 from Bluebird import Bluebird
 
+import re
 from time import sleep
 from os import getpid, unlink
 from subprocess import Popen, PIPE
 
 
-def parse_proc_status(pid):
-    tracer_field = 'TracerPid'
+def parse_proc_status(pid, field):
     proc_pid_path = '/proc/{}/status'.format(pid)
     with open(proc_pid_path) as f:
-        status_raw = f.readlines()
-    tracer_field = status_raw[6].split()
-    return int(tracer_field[1])
+        status_raw = f.read()
+    status_field = re.findall('{}:\t(.+)\n'.format(field), status_raw)
+    return int(status_field[0])
 
 
 class BlueBirdTest(unittest.TestCase):
@@ -37,7 +37,7 @@ class BlueBirdTest(unittest.TestCase):
         number_of_attaches = 10
         for _ in range(number_of_attaches):
             self.create_test_proc()
-            tracer_pid = parse_proc_status(self.test_proc_pid)
+            tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
             self.assertEqual(test_pid, tracer_pid)
             # allow for cleanup of resources
             if self.test_proc.stdout is not None:
@@ -111,11 +111,11 @@ class BlueBirdTest(unittest.TestCase):
     def test_detach(self):
         self.create_test_proc()
         sleep(1)
-        tracer_pid = parse_proc_status(self.test_proc_pid)
+        tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
         self.assertEqual(test_pid, tracer_pid)
         self.bluebird.stop()
         sleep(1)
-        tracer_pid = parse_proc_status(self.test_proc_pid)
+        tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
         self.assertEqual(0, tracer_pid)
     
 if __name__ == '__main__':
