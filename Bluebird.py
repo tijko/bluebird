@@ -3,6 +3,7 @@
 
 from bluebird import *
 
+import re
 from os import getpid
 from time import sleep
 from threading import Thread
@@ -51,14 +52,10 @@ class Bluebird(object):
             detach(self.traced_pid)
             self.attached = False
 
+    @property
     def is_attached(self):
-        status_fields = self._parse_status()
-        for field in status_fields:
-            if 'TracerPid' in field[0]:
-                break
-        if str(self.pid) != field[1]:
-            return False
-        return True
+        tracer = self._parse_status('TracerPid')
+        return str(self.pid) != tracer 
         
     def get_heap(self, pid):
         with open('/proc/{}/maps'.format(pid)) as fh:
@@ -127,16 +124,17 @@ class Bluebird(object):
         bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, path)
         self.heap_bounds = self.get_heap(self.traced_pid)
 
+    @property
     def name(self):
-        status = self._parse_status()
-        self.name = status[0][1]
+        return self._parse_status('Name')
 
-    def _parse_status(self):
+    def _parse_status(self, field):
         with open('/proc/{}/status'.format(self.traced_pid)) as f:
             status_raw = f.read()
-        status = [field.split('\t') for field in status_raw.split('\n')]
-        return status
-        
+        proc_field = re.findall('{}:\t(.+)\n'.format(field), status_raw)
+        if not proc_field:
+            raise InvalidStatusField
+        return proc_field[0] 
 
 class TracingThread(Thread):
 
@@ -168,3 +166,9 @@ class NoHeapAddress(BaseException):
 
     def __str__(self):
         return 'Process has no available heap address'
+
+
+class InvalidStatusField(BaseException):
+
+    def __str__(self):
+        return 'Invalid Process Status field'
