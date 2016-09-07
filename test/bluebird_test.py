@@ -3,7 +3,7 @@
 
 import unittest
 
-from Bluebird import Bluebird
+from Bluebird import *
 
 import re
 from time import sleep
@@ -107,7 +107,40 @@ class BlueBirdTest(unittest.TestCase):
         foo_syscall = 404
         test_find = self.bluebird.get_call(foo_syscall, timeout=5)
         self.assertIsNone(test_find)
-   
+
+    def test_bbrk(self):
+        self.create_test_proc()
+        sleep(1)
+        self.bluebird.get_heap()
+        limit_before = self.bluebird.heap_bounds[1]
+        brk_inc_size = 0xffff
+        self.bluebird.expand_heap(brk_inc_size)
+        sleep(1)
+        limit_after = self.bluebird.heap_bounds[1]
+        self.assertEqual(limit_before + brk_inc_size + 1, limit_after)
+
+    def test_bmmap_anon(self):
+        self.create_test_proc()
+        sleep(1)
+        self.bluebird.get_heap()
+        self.bluebird.create_mmap(0, PAGESIZE, PROT_EXEC | PROT_WRITE,
+                MAP_ANONYMOUS | MAP_SHARED, 0)
+        self.bluebird.get_maps()
+        self.assertIsNotNone(self.bluebird.maps.get('(deleted)'))
+
+    '''
+    def test_bmmap_file(self):
+        self.create_test_proc()
+        sleep(1)
+        self.bluebird.get_heap()
+        self.bluebird.create_mmap(0, PAGESIZE, PROT_EXEC | PROT_WRITE,
+                MAP_ANONYMOUS | MAP_SHARED, 0, path='/tmp/bluebird')
+        self.bluebird.get_maps()
+        print(self.bluebird.maps)
+        sleep(1)
+        self.assertIsNotNone(self.bluebird.maps.get('/tmp/bluebird'))
+    '''
+
     def test_detach(self):
         self.create_test_proc()
         sleep(1)
