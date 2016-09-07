@@ -38,7 +38,7 @@ class Bluebird(object):
         self.rstrs = {}
         self.attached = False
         self.tracing = False
-        self.heap_bounds = self.get_heap(pid)
+        self.get_heap()
         # set attached pid COMM
 
     def start(self):
@@ -57,15 +57,19 @@ class Bluebird(object):
         tracer = self._parse_status('TracerPid')
         return str(self.pid) != tracer 
         
-    def get_heap(self, pid):
-        with open('/proc/{}/maps'.format(pid)) as fh:
-            raw_map_data = fh.read()
-        if raw_map_data.find('heap') == -1: return None
-        for _map in raw_map_data.split('\n'):
-            if 'heap' in _map: break
-        return self.parse_heap_map(_map)
+    def get_heap(self):
+        self.get_maps()
+        self.heap_bounds = self.parse_heap_map(self.maps.get('[heap]'))
+
+    def get_maps(self):
+        with open('/proc/{}/maps'.format(self.traced_pid)) as fh:
+            raw_map_data = fh.readlines()
+        self.maps = {}
+        for _map in raw_map_data:
+            self.maps[_map.split()[-1].strip('\n')] = _map.split()[0]
 
     def parse_heap_map(self, heap_map):
+        if heap_map is None: return None
         address_range = heap_map.split()[0]
         start, stop = address_range.split('-')
         return int(start, 16), int(stop, 16)
@@ -112,17 +116,17 @@ class Bluebird(object):
     def expand_heap(self, amount):
         if self.heap_bounds is None:
             raise NoHeapAddress    
-        start = self.heap_bounds[0]
-        new_bounds = self.heap_bounds[1] + amount
+        start = self.heap_bounds[1]
+        new_bounds = start + amount
         bbrk(self.traced_pid, new_bounds, start)
-        self.heap_bounds = self.get_heap(self.traced_pid)
+        self.get_heap()
 
     def create_mmap(self, addr, length, prot, flags, offset, path=None):
         if self.heap_bounds is None:
             raise NoHeapAddress    
         heap = self.heap_bounds[1]
         bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, path)
-        self.heap_bounds = self.get_heap(self.traced_pid)
+        self.get_heap()
 
     @property
     def name(self):
