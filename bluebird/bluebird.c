@@ -714,8 +714,14 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
 
     int fd = 0;
 
-    if (path != NULL)
+    if (path != NULL) {
         fd = create_mmap_file(pid, path, heap_addr);
+
+        if (fd < 0) {
+            bluebird_handle_error();
+            return NULL;
+        }
+    }
 
     long _args[] = { SYS_mmap, mmap_addr, length, prot, fd, offset, flags };
     int offsets[] = { ORIG_RAX, RDI, RSI, RDX, R8, R9, R10 };
