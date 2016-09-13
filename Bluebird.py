@@ -39,13 +39,12 @@ class Bluebird(object):
         self.attached = False
         self.tracing = False
         self.get_heap()
-        # set attached pid COMM
 
     def start(self):
-        # XXX handle already attached trace
-        if not self.attached:
-            attach(self.traced_pid)
-            self.attached = True
+        if self.attached:
+            raise RunningTraceError
+        attach(self.traced_pid)
+        self.attached = True
 
     def stop(self):
         if self.attached:
@@ -105,13 +104,6 @@ class Bluebird(object):
             trace_thread.start()
         else:    
             find_syscall(self.traced_pid, call, timeout, 0)
-
-    def dump_exec(self):
-        pass
-
-    def exec_dir(self):
-        #make_call(getcwd)
-        pass
 
     def expand_heap(self, amount):
         if self.heap_bounds is None:
