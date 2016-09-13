@@ -128,7 +128,6 @@ class BlueBirdTest(unittest.TestCase):
         self.bluebird.get_maps()
         self.assertIsNotNone(self.bluebird.maps.get('(deleted)'))
 
-    '''
     def test_bmmap_file(self):
         self.create_test_proc()
         sleep(1)
@@ -136,10 +135,8 @@ class BlueBirdTest(unittest.TestCase):
         self.bluebird.create_mmap(0, PAGESIZE, PROT_EXEC | PROT_WRITE,
                 MAP_ANONYMOUS | MAP_SHARED, 0, path='/tmp/bluebird')
         self.bluebird.get_maps()
-        print(self.bluebird.maps)
         sleep(1)
-        self.assertIsNotNone(self.bluebird.maps.get('/tmp/bluebird'))
-    '''
+        self.assertIsNotNone(self.bluebird.maps.get('(deleted)'))
 
     def test_detach(self):
         self.create_test_proc()
