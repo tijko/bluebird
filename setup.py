@@ -12,6 +12,7 @@ setup(
     version='0.0.1',
     author='Tim Konick',
     description='Allows access to running process internals',
-    ext_modules=[Extension('libbluebird', 
-                 sources=['libbluebird/libbluebird.c'])]
+    install_requires=['pyelftools'],
+    ext_modules=[Extension('bluebird', 
+                 sources=['bluebird/bluebird.c'])]
 )
