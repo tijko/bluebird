@@ -7,6 +7,7 @@ import re
 from os import getpid
 from time import sleep
 from threading import Thread
+from elftools.elf.elffile import *
 
 from mmap import PROT_EXEC, PROT_READ, PROT_WRITE, \
            MAP_PRIVATE, MAP_ANONYMOUS, MAP_SHARED, \
@@ -120,6 +121,16 @@ class Bluebird(object):
         bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, path)
         self.get_heap()
 
+    def get_sections(self, path=None):
+        if path is None:    
+            path = '/usr/bin/{}'.format(self.name)
+        fh = open(path, 'rb')
+        try:
+            elfreader = ELFFile(fh)
+        except:
+            raise InvalidPath
+        return {s.name:s.data() for s in elfreader.iter_sections()}
+
     @property
     def name(self):
         return self._parse_status('Name')
@@ -168,3 +179,9 @@ class InvalidStatusField(BaseException):
 
     def __str__(self):
         return 'Invalid Process Status field'
+
+
+class InvalidPath(BaseException):
+
+    def __str__(self):
+        return 'Invalid executable path'
