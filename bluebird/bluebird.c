@@ -731,6 +731,23 @@ static PyObject *bluebird_bmmap(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
+static PyObject *bluebird_bgetcwd(PyObject *self, PyObject *args)
+{
+    int pid, length;
+    long addr, heap_addr;
+
+    if (!PyArg_ParseTuple(args, "ilil:bgetcwd", &pid, &addr, 
+                                             &length, &heap_addr))
+        return NULL;
+
+    long _args[] = { SYS_getcwd, addr, length };
+    int offsets[] = { ORIG_RAX, RDI, RSI };
+
+    insert_call(pid, _args, offsets, 3, heap_addr); 
+
+    Py_RETURN_NONE;
+}
+
 static PyObject *bluebird_attach(PyObject *self, PyObject *args)
 {
     pid_t pid;
@@ -795,6 +812,8 @@ static PyMethodDef bluebirdmethods[] = {
      "allows for bluebird to extend the heap by means of brk"},
     {"bmmap", bluebird_bmmap, METH_VARARGS,
      "creates a memory map for the traced process"},
+    {"bgetcwd", bluebird_bgetcwd, METH_VARARGS,
+     "finds the current directory for the traced process"},
     {NULL, NULL, 0, NULL}
 };
 
