@@ -4,7 +4,7 @@
 from bluebird import *
 
 import re
-from os import getpid
+import os
 from time import sleep
 from threading import Thread
 from elftools.elf.elffile import *
@@ -12,6 +12,9 @@ from elftools.elf.elffile import *
 from mmap import PROT_EXEC, PROT_READ, PROT_WRITE, \
            MAP_PRIVATE, MAP_ANONYMOUS, MAP_SHARED, \
            MAP_DENYWRITE, MAP_EXECUTABLE, PAGESIZE
+
+
+PATH_MAX = 0xfff + 1
 
 
 class TraceResults(object):
@@ -33,7 +36,7 @@ class Bluebird(object):
     trace_results = TraceResults()
 
     def __init__(self, pid):
-        self.pid = getpid()
+        self.pid = os.getpid()
         self.traced_pid = pid
         self.wstrs = {}
         self.rstrs = {}
@@ -121,9 +124,23 @@ class Bluebird(object):
         bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, path)
         self.get_heap()
 
-    def get_sections(self, path=None):
-        if path is None:    
-            path = '/usr/bin/{}'.format(self.name)
+    def get_trace_dir(self):
+        self.path_addr = self.heap_bounds[1]
+        self.length = PATH_MAX - 1
+        self.expand_heap(self.length)
+        self.get_heap()
+        path = bgetcwd(self.traced_pid, self.path_addr,
+                       self.length, self.heap_bounds[1])
+        words = self.length // 8
+        path = readstring(self.traced_pid, self.path_addr, words)
+        return path
+
+    def get_sections(self, path=None, use_current=False):
+        if use_current:
+            cdir = self.get_trace_dir()
+            path = os.path.join(cdir, self.name)
+        elif path is None:    
+            path = os.path.join('/usr/bin/', self.name)
         fh = open(path, 'rb')
         try:
             elfreader = ELFFile(fh)
