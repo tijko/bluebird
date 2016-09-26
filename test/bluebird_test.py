@@ -6,8 +6,8 @@ import unittest
 from Bluebird import *
 
 import re
+import os
 from time import sleep
-from os import getpid, unlink
 from subprocess import Popen, PIPE
 
 
@@ -48,7 +48,7 @@ class BlueBirdTest(unittest.TestCase):
     def test_writestring(self):
         # XXX using address from objdump -s alt_print
         # find a way to universally calculate address reading the binary
-        test_proc_addr = 0x400754
+        test_proc_addr = 0x400764
         test_proc_word = 'Potatoe'
         test_proc_filename = 'alt_print.txt'
         test_proc_file = open(test_proc_filename, 'x')
@@ -62,7 +62,7 @@ class BlueBirdTest(unittest.TestCase):
         test_proc_file.close()
         with open(test_proc_filename) as test_file:
             proc_output = test_file.read()
-        unlink(test_proc_filename)
+        os.unlink(test_proc_filename)
         proc_output_lines = list(filter(None, proc_output.split('\n')))
         before_write = proc_output_lines[0]
         after_write = proc_output_lines[-1]
@@ -74,7 +74,7 @@ class BlueBirdTest(unittest.TestCase):
         # find a way to universally calculate address reading the binary
         self.create_test_proc()
         sleep(1)
-        test_proc_addr = 0x400754
+        test_proc_addr = 0x400764
         test_proc_word = 'Process'
         word = self.bluebird.read(test_proc_addr, 1)
         self.assertEqual(test_proc_word, word)
@@ -138,6 +138,13 @@ class BlueBirdTest(unittest.TestCase):
         sleep(1)
         self.assertIsNotNone(self.bluebird.maps.get('(deleted)'))
 
+    def test_get_trace_dir(self):
+        self.create_test_proc()
+        sleep(1)
+        curr_dir = os.getcwd()
+        self.bluebird.get_heap()
+        self.assertEqual(curr_dir, self.bluebird.get_trace_dir()) 
+
     def test_detach(self):
         self.create_test_proc()
         sleep(1)
@@ -151,6 +158,6 @@ class BlueBirdTest(unittest.TestCase):
 if __name__ == '__main__':
     # XXX these syscalls are defined in /usr/include/asm/unistd_64.h
     # rewrite to allow compatibility for 32 too.
-    test_pid = getpid()
+    test_pid = os.getpid()
     test_proc_syscalls = (1, 35)
     unittest.main(verbosity=3)
