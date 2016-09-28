@@ -22,7 +22,9 @@ def parse_proc_status(pid, field):
 class BlueBirdTest(unittest.TestCase):
 
     def setUp(self):
-        self.test_proc = Popen('./alt_print', stdout=PIPE)
+        self.test_proc_filename = 'alt_print.txt'
+        self.stdout = open(self.test_proc_filename, 'x')
+        self.test_proc = Popen('./alt_print', stdout=self.stdout)
         self.test_proc_pid = self.test_proc.pid
         self.bluebird = Bluebird(self.test_proc_pid)
         self.bluebird.start()
@@ -31,7 +33,10 @@ class BlueBirdTest(unittest.TestCase):
     def tearDown(self):
         if self.test_proc.stdout is not None:
             self.test_proc.stdout.close()
+        else:
+            self.stdout.close()
         self.test_proc.kill()
+        os.unlink(self.test_proc_filename)
         
     def test_attach(self):
         tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
@@ -42,15 +47,13 @@ class BlueBirdTest(unittest.TestCase):
         # find a way to universally calculate address reading the binary
         test_proc_addr = 0x400764
         test_proc_word = 'Potatoe'
-        test_proc_filename = 'alt_print.txt'
         test_proc_output = 'Process <{}> is running!'.format(self.test_proc_pid)
         test_proc_newoutput = '{} <{}> is running!'.format(test_proc_word, 
                                                            self.test_proc_pid)
         self.bluebird.write(test_proc_addr, test_proc_word)
         sleep(2)
-        with open(test_proc_filename) as test_file:
+        with open(self.test_proc_filename) as test_file:
             proc_output = test_file.read()
-        os.unlink(test_proc_filename)
         proc_output_lines = list(filter(None, proc_output.split('\n')))
         before_write = proc_output_lines[0]
         after_write = proc_output_lines[-1]
