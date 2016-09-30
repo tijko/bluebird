@@ -79,14 +79,14 @@ class BlueBirdTest(unittest.TestCase):
      
     def test_find_syscall(self):
         getsid = 124
-        test_find = self.bluebird.get_call(getsid, non_blocking=True)
+        test_find = self.bluebird.find_call(getsid, non_blocking=True)
         while self.bluebird.tracing:
             sleep(1)
         self.assertIsNone(test_find)
     
     def test_find_syscall_timeout(self):
         foo_syscall = 404
-        test_find = self.bluebird.get_call(foo_syscall, timeout=5)
+        test_find = self.bluebird.find_call(foo_syscall, timeout=5)
         self.assertIsNone(test_find)
 
     def test_bbrk(self):
