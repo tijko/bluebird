@@ -148,6 +148,8 @@ long bluebird_ptrace_call(enum __ptrace_request req, pid_t pid,
 
     long ptrace_ret = ptrace(req, pid, addr, data);
 
+    /* corner case brought up on uber-pyflame: ptrace_ret was a peek and the data at addr was -1 */
+
     if (ptrace_ret < 0) 
         return -1;
 
@@ -259,9 +261,8 @@ static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
         calls[syscalls_made++] = rgs.orig_rax;
     }
 
-    if (signal_cont)
-        if (bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
-            goto error;
+    if (signal_cont && bluebird_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+        goto error;
 
     return calls;
 
