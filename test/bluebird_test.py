@@ -8,7 +8,7 @@ from Bluebird import *
 import re
 import os
 from time import sleep
-from subprocess import Popen, PIPE
+from subprocess import Popen
 
 
 def parse_proc_status(pid, field):
