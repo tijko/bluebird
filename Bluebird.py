@@ -38,8 +38,8 @@ class Bluebird(object):
     def __init__(self, pid):
         self.pid = os.getpid()
         self.traced_pid = pid
-        self.wstrs = {}
-        self.rstrs = {}
+        self.wdata = {}
+        self.rdata = {}
         self.attached = False
         self.tracing = False
         self.get_heap()
@@ -82,12 +82,15 @@ class Bluebird(object):
             writeint(self.traced_pid, addr, data)
         else:
             writestring(self.traced_pid, addr, data)
+        self.wdata[addr] = data
 
     def read(self, addr, nwords, readtype=str):
         if isinstance(readtype, int):
-            return readint(self.traced_pid, addr, nwords)
+            peek = readint(self.traced_pid, addr, nwords)
         else:
-            return readstring(self.traced_pid, addr, nwords)
+            peek = readstring(self.traced_pid, addr, nwords)
+        self.rdata[addr] = peek
+        return peek
             
     def get_current_call(self):
         return get_syscall(self.traced_pid)
@@ -97,7 +100,7 @@ class Bluebird(object):
         # syscalls without allowing any calls to slip by
         return get_syscalls(self.traced_pid, nsyscalls)
 
-    def get_call(self, call, non_blocking=False, timeout=0):
+    def find_call(self, call, non_blocking=False, timeout=0):
         if non_blocking:
             if self.tracing:
                 raise RunningTrace
@@ -159,6 +162,7 @@ class Bluebird(object):
         if not proc_field:
             raise InvalidStatusField
         return proc_field[0] 
+
 
 class TracingThread(Thread):
 
