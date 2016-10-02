@@ -5,6 +5,7 @@ from bluebird import *
 
 import re
 import os
+from math import inf
 from time import sleep
 from threading import Thread
 from elftools.elf.elffile import *
@@ -40,6 +41,8 @@ class Bluebird(object):
         self.traced_pid = pid
         self.wdata = {}
         self.rdata = {}
+        self.trace_wdata = {}
+        self.trace_rdata = {}
         self.attached = False
         self.tracing = False
         self.get_heap()
@@ -82,16 +85,30 @@ class Bluebird(object):
             writeint(self.traced_pid, addr, data)
         else:
             writestring(self.traced_pid, addr, data)
-        self.wdata[addr] = data
+        self.trace_wdata[addr] = data
 
     def read(self, addr, nwords, readtype=str):
         if isinstance(readtype, int):
             peek = readint(self.traced_pid, addr, nwords)
         else:
             peek = readstring(self.traced_pid, addr, nwords)
-        self.rdata[addr] = peek
+        self.trace_rdata[addr] = peek
         return peek
             
+    def rw_trace(self, call, ncalls=inf, non_blocking=False):
+        if non_blocking:
+            io_trace_thread = Thread(target=self._io_trace, calls=[ncalls])
+            io_trace_thread.start()
+        else:
+            io_trace(call, ncalls)
+
+    def _io_trace(call, calls):
+        ncall = 0
+        io = self.rdata if call == NR_read else self.wdata
+        while ncall < calls:
+            self.io.update(io_trace(call))
+            ncall += 1
+
     def get_current_call(self):
         return get_syscall(self.traced_pid)
 
