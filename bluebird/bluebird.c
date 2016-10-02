@@ -394,6 +394,11 @@ static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
     return call_list;
 }
 
+static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
+{
+    Py_RETURN_NONE;
+}
+
 static PyObject *bluebird_resume(PyObject *self, PyObject *args)
 {
     pid_t pid;
@@ -815,6 +820,8 @@ static PyMethodDef bluebirdmethods[] = {
      "creates a memory map for the traced process"},
     {"bgetcwd", bluebird_bgetcwd, METH_VARARGS,
      "finds the current directory for the traced process"},
+    {"iotrace", bluebird_iotrace, METH_VARARGS,
+     "captures read/write calls returning register values"},
     {NULL, NULL, 0, NULL}
 };
 
