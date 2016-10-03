@@ -302,7 +302,8 @@ static int *find_call(struct thread_args *find_args)
         }
     }
 
-    bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
+    if (find_args->io_trace == 0) 
+        bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
 
     *find_exit_status = 0;
 
@@ -431,7 +432,7 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
 
     struct user_regs_struct rgs;
 
-    if (ptrace(pid, PTRACE_GETREGS, 0, &rgs) < 0) {
+    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) {
         bluebird_handle_error();
         goto error;
     }

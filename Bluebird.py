@@ -5,10 +5,12 @@ from bluebird import *
 
 import re
 import os
+import platform
 from math import inf
 from time import sleep
 from threading import Thread
 from elftools.elf.elffile import *
+from collections import defaultdict
 
 from mmap import PROT_EXEC, PROT_READ, PROT_WRITE, \
            MAP_PRIVATE, MAP_ANONYMOUS, MAP_SHARED, \
@@ -16,6 +18,23 @@ from mmap import PROT_EXEC, PROT_READ, PROT_WRITE, \
 
 
 PATH_MAX = 0xfff + 1
+
+syscall_nr_path = '/usr/include/asm/unistd_{}.h'
+
+if platform.machine() == 'x86_64':
+    syscall_machine = '64'
+else:
+    syscall_machine = '32'
+
+with open(syscall_nr_path.format(syscall_machine)) as fh:
+    syscalls_raw = fh.read()
+
+syscalls = dict()
+
+for syscall_raw in syscalls_raw.split('\n'):
+    if syscall_raw.startswith('#define __'):
+        syscall = syscall_raw.split()
+        syscalls[syscall[1].strip('__')] = int(syscall[2])
 
 
 class TraceResults(object):
@@ -39,8 +58,8 @@ class Bluebird(object):
     def __init__(self, pid):
         self.pid = os.getpid()
         self.traced_pid = pid
-        self.wdata = {}
-        self.rdata = {}
+        self.wdata = defaultdict(list)
+        self.rdata = defaultdict(list)
         self.trace_wdata = {}
         self.trace_rdata = {}
         self.attached = False
@@ -96,7 +115,8 @@ class Bluebird(object):
         return peek
             
     def io_update(self, call, io, ncall, ncalls):
-        io.update(self.traced_results)
+        for fd in self.traced_results:
+            io[fd].append(self.traced_results[fd])
         if ncall == ncalls:
             return
         self.create_trace_thread(io_trace, self.io_update, [call], 
@@ -104,13 +124,15 @@ class Bluebird(object):
 
     def rw_trace(self, call, ncalls=inf, non_blocking=False):
         ncall = 0
-        io = self.rdata if call == NR_read else self.wdata
+        io = self.rdata if call == syscalls['NR_read'] else self.wdata
         if non_blocking:
-            self.create_trace_thread(io_trace, self.io_update, [call], 
+            self.create_trace_thread(iotrace, self.io_update, [call, 1], 
                                     [call, io, ncall + 1, ncalls])
             return
         while ncall < ncalls:
-            io.update(io_trace(call))
+            io_made = iotrace(self.traced_pid, call, 0)
+            for fd in io_made:
+                io[fd].append(io_made[fd])
             ncall += 1
 
     def get_current_call(self):
