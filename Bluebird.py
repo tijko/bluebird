@@ -95,18 +95,22 @@ class Bluebird(object):
         self.trace_rdata[addr] = peek
         return peek
             
-    def rw_trace(self, call, ncalls=inf, non_blocking=False):
-        if non_blocking:
-            io_trace_thread = Thread(target=self._io_trace, calls=[ncalls])
-            io_trace_thread.start()
-        else:
-            io_trace(call, ncalls)
+    def io_update(self, call, io, ncall, ncalls):
+        io.update(self.traced_results)
+        if ncall == ncalls:
+            return
+        self.create_trace_thread(io_trace, self.io_update, [call], 
+                                [call, io, ncall + 1, ncalls])
 
-    def _io_trace(call, calls):
+    def rw_trace(self, call, ncalls=inf, non_blocking=False):
         ncall = 0
         io = self.rdata if call == NR_read else self.wdata
-        while ncall < calls:
-            self.io.update(io_trace(call))
+        if non_blocking:
+            self.create_trace_thread(io_trace, self.io_update, [call], 
+                                    [call, io, ncall + 1, ncalls])
+            return
+        while ncall < ncalls:
+            io.update(io_trace(call))
             ncall += 1
 
     def get_current_call(self):
@@ -119,13 +123,8 @@ class Bluebird(object):
 
     def find_call(self, call, non_blocking=False, timeout=0):
         if non_blocking:
-            if self.tracing:
-                raise RunningTrace
-            self.stop()
-            sleep(1)
-            trace_thread = TracingThread(self, find_syscall, None,
-                                         self.traced_pid, call, timeout, 1)
-            trace_thread.start()
+            self.create_trace_thread(find_syscall, None, 
+                                    [call, timeout, 1], None)
         else:    
             find_syscall(self.traced_pid, call, timeout, 0)
 
@@ -180,26 +179,36 @@ class Bluebird(object):
             raise InvalidStatusField
         return proc_field[0] 
 
+    def create_trace_thread(self, func, cb, func_args, cb_args):
+        if self.tracing:
+            raise RunningTrace
+        self.stop()
+        sleep(1)
+        trace_thread = TracingThread(self, func, cb, func_args, cb_args)
+        trace_thread.start()
 
 class TracingThread(Thread):
 
-    def __init__(self, trace_obj, trace_func, trace_cb, *args):
+    def __init__(self, trace_obj, trace_func, trace_cb, 
+                 trace_func_args=[], trace_cb_args=[]):
         super(TracingThread, self).__init__()
         self.trace_obj = trace_obj
         self.trace_func = trace_func
+        self.trace_func_args = trace_func_args
         self.trace_cb = trace_cb
-        self.args = args
+        self.trace_cb_args = trace_cb_args
 
     def run(self):
         self.trace_obj.tracing = True
         try:
-            trace_results = self.trace_func(*self.args)
+            trace_results = self.trace_func(self.traced_pid, *self.args)
         except:
             trace_results = None
         finally:
             self.trace_obj.tracing = False
             self.trace_obj.trace_results = trace_results
-
+            if self.trace_cb is not None:
+                self.trace_cb(*self.trace_cb_args)
 
 class RunningTraceError(BaseException):
 

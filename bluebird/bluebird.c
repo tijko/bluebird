@@ -237,7 +237,7 @@ static int set_sys_step(pid_t pid, enum __ptrace_request step)
     return 0;
 }
 
-static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
+static int *get_syscalls(pid_t pid, int nsyscalls, int enter, bool signal_cont)
 {
     struct user_regs_struct rgs;
     int *calls = malloc(sizeof(int) * nsyscalls);
@@ -255,7 +255,7 @@ static int *get_syscalls(pid_t pid, int nsyscalls, bool signal_cont)
 
         //  checking the restart_call kernel syscall after SIGSTP
         //  orig_rax mask against 0x80 SIGTRAP for info on entry/exit?
-        if (rgs.orig_rax == 219 || rgs.rax == -ENOSYS)
+        if ((rgs.orig_rax == 219 && enter) || rgs.rax == -ENOSYS)
             continue;
 
         calls[syscalls_made++] = rgs.orig_rax;
@@ -272,13 +272,14 @@ error:
     return NULL;
 }
 
-struct find_call_args {
+struct thread_args {
     pid_t pid;
     int call;
     int timeout;
+    int io_trace;
 };
 
-static int *find_call(struct find_call_args *find_args)
+static int *find_call(struct thread_args *find_args)
 {
     int *current_call = NULL;
     int *find_exit_status = malloc(sizeof(int));
@@ -287,12 +288,12 @@ static int *find_call(struct find_call_args *find_args)
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     clock_t start = ts.tv_sec;
-        
+    int enter = find_args->io_trace == 0 || find_args->call == SYS_write ? 1 : 0;
     while (!current_call || *current_call != find_args->call) {
-        current_call = get_syscalls(find_args->pid, 1, false);
-        if (!current_call) 
-            if (bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0)
-                return find_exit_status;
+        current_call = get_syscalls(find_args->pid, 1, enter, false);
+        if (!current_call && 
+            bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0)
+            return find_exit_status;
 
         if (find_args->timeout > 0) {
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -318,9 +319,10 @@ static PyObject *bluebird_find_syscall(PyObject *self, PyObject *args)
         return NULL;
 
     void *find_exit_status = NULL;
-    struct find_call_args find_args = { pid, call, timeout };
+    struct thread_args find_args = { pid, call, timeout, 0 };
 
     if (threaded) {
+
         if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
             goto error;
 
@@ -355,7 +357,7 @@ static PyObject *bluebird_get_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i:get_syscall", &pid))
         return NULL;
 
-    int *call = get_syscalls(pid, 1, true);
+    int *call = get_syscalls(pid, 1, 1, true);
 
     if (!call)
         return NULL;
@@ -376,7 +378,7 @@ static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ii:get_syscalls", &pid, &nsyscalls))
         return NULL;
 
-    int *syscalls = get_syscalls(pid, nsyscalls, true);
+    int *syscalls = get_syscalls(pid, nsyscalls, 1, true);
 
     if (!syscalls)
         return NULL;
@@ -396,7 +398,75 @@ static PyObject *bluebird_get_syscalls(PyObject *self, PyObject *args)
 
 static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
 {
-    Py_RETURN_NONE;
+    pid_t pid;
+    int call, threaded;
+
+    if (!PyArg_ParseTuple(args, "iii:iotrace", &pid, &call, &threaded))
+        return NULL;
+
+    void *find_exit_status = NULL;
+    struct thread_args io_args = { pid, call, 0, 1 };
+
+    if (threaded) {
+
+        if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) {
+            bluebird_handle_error();
+            goto error;
+        }
+
+        Py_BEGIN_ALLOW_THREADS
+        pthread_t find_io_call_thread;
+        pthread_create(&find_io_call_thread, NULL, (void *) find_call, 
+                                                   (void *) &io_args);
+
+        pthread_join(find_io_call_thread, &find_exit_status);
+        Py_END_ALLOW_THREADS
+    } else
+        find_call(&io_args);
+
+    /*
+     * Write -> rdi:fd, rsi:buf, rdx:bytes
+     * Read  -> rdi:fd, rsi:buf, rdx:bytes
+     */
+
+    struct user_regs_struct rgs;
+
+    if (ptrace(pid, PTRACE_GETREGS, 0, &rgs) < 0) {
+        bluebird_handle_error();
+        goto error;
+    }
+
+    int fd_key = rgs.rdi;
+    long addr = rgs.rsi;
+    int words_to_read = rgs.rdx / WORD;
+    char *words = malloc(rgs.rdx + 1);
+
+    for (int i=0; i < words_to_read; i++) {
+
+        long read_string = bluebird_read(pid, addr); 
+        
+        if (read_string < 0)
+            return NULL;
+
+        memcpy(words + (i * WORD), (char *) &read_string, WORD);
+
+        addr += WORD;
+    }
+ 
+    ptrace(PTRACE_CONT, pid, 0, 0);
+
+    words[WORD * words_to_read] = '\0';
+
+    PyObject *io = PyDict_New();
+    PyObject *key = PyLong_FromLong(fd_key);
+    PyObject *val = PyUnicode_FromString(words);
+    PyDict_SetItem(io, key, val);
+
+    return io;
+
+error:
+
+    return NULL;
 }
 
 static PyObject *bluebird_resume(PyObject *self, PyObject *args)
