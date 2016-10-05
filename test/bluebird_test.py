@@ -118,6 +118,14 @@ class BlueBirdTest(unittest.TestCase):
         self.bluebird.get_heap()
         self.assertEqual(curr_dir, self.bluebird.get_trace_dir()) 
 
+    def test_iotrace_write(self):
+        write = syscalls['NR_write']
+        process_str = 'Process <{}> is running!\n'.format(self.test_proc_pid)
+        self.bluebird.rw_trace(write, ncalls=4)
+        for fd in self.bluebird.wdata:
+            for wstr in self.bluebird.wdata[fd]:
+                self.assertEqual(process_str, wstr)
+
     def test_detach(self):
         tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
         self.assertEqual(test_pid, tracer_pid)
