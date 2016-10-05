@@ -439,7 +439,7 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
 
     int fd_key = rgs.rdi;
     long addr = rgs.rsi;
-    int words_to_read = rgs.rdx / WORD;
+    int words_to_read = (rgs.rdx / WORD) + 1;
     char *words = malloc(rgs.rdx + 1);
 
     for (int i=0; i < words_to_read; i++) {
