@@ -283,7 +283,7 @@ static int *find_call(struct thread_args *find_args)
 {
     int *current_call = NULL;
     int *find_exit_status = malloc(sizeof(int));
-    *find_exit_status = -1;
+    *find_exit_status = 0;
 
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
@@ -292,8 +292,10 @@ static int *find_call(struct thread_args *find_args)
     while (!current_call || *current_call != find_args->call) {
         current_call = get_syscalls(find_args->pid, 1, enter, false);
         if (!current_call && 
-            bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0)
+            bluebird_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0) {
+            *find_exit_status = errno;
             return find_exit_status;
+        }
 
         if (find_args->timeout > 0) {
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -301,11 +303,6 @@ static int *find_call(struct thread_args *find_args)
                 break;
         }
     }
-
-    if (find_args->io_trace == 0) 
-        bluebird_ptrace_call(PTRACE_DETACH, find_args->pid, 0, 0);
-
-    *find_exit_status = 0;
 
     return find_exit_status;
 }
@@ -407,13 +404,10 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
 
     void *find_exit_status = NULL;
     struct thread_args io_args = { pid, call, 0, 1 };
-
     if (threaded) {
 
-        if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) {
-            bluebird_handle_error();
+        if (bluebird_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) 
             goto error;
-        }
 
         Py_BEGIN_ALLOW_THREADS
         pthread_t find_io_call_thread;
@@ -423,7 +417,12 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
         pthread_join(find_io_call_thread, &find_exit_status);
         Py_END_ALLOW_THREADS
     } else
-        find_call(&io_args);
+        find_exit_status = find_call(&io_args);
+
+    if (*(int *) find_exit_status < 0)
+        goto error;
+
+    free(find_exit_status);
 
     /*
      * Write -> rdi:fd, rsi:buf, rdx:bytes
@@ -432,40 +431,41 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
 
     struct user_regs_struct rgs;
 
-    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) {
-        bluebird_handle_error();
+    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
         goto error;
-    }
 
     int fd_key = rgs.rdi;
     long addr = rgs.rsi;
     int words_to_read = (rgs.rdx / WORD) + 1;
-    char *words = malloc(rgs.rdx + 1);
+    char *words = malloc(WORD * rgs.rdx + 2);
 
     for (int i=0; i < words_to_read; i++) {
 
         long read_string = bluebird_read(pid, addr); 
         
         if (read_string < 0)
-            return NULL;
+            goto error;
 
         memcpy(words + (i * WORD), (char *) &read_string, WORD);
 
         addr += WORD;
     }
  
-    ptrace(PTRACE_CONT, pid, 0, 0);
-
-    words[WORD * words_to_read] = '\0';
+    words[(WORD * words_to_read) - 1] = '\0';
 
     PyObject *io = PyDict_New();
-    PyObject *key = PyLong_FromLong(fd_key);
-    PyObject *val = PyUnicode_FromString(words);
-    PyDict_SetItem(io, key, val);
-
+    PyDict_SetItem(io, PyLong_FromLong(fd_key),
+                       PyUnicode_FromString(words));
     return io;
 
 error:
+
+    if (find_exit_status) {
+        errno = *(int *) find_exit_status;
+        free(find_exit_status);
+    }
+
+    bluebird_handle_error();
 
     return NULL;
 }
