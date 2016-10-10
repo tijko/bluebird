@@ -437,7 +437,7 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
     int fd_key = rgs.rdi;
     long addr = rgs.rsi;
     int words_to_read = (rgs.rdx / WORD) + 1;
-    char *words = malloc(WORD * rgs.rdx + 2);
+    char *words = malloc(rgs.rdx + 1);
 
     for (int i=0; i < words_to_read; i++) {
 
@@ -451,7 +451,7 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
         addr += WORD;
     }
  
-    words[(WORD * words_to_read) - 1] = '\0';
+    words[rgs.rdx] = '\0';
 
     PyObject *io = PyDict_New();
     PyDict_SetItem(io, PyLong_FromLong(fd_key),
