@@ -3,6 +3,8 @@
 
 from bluebird import *
 
+import sys
+
 import re
 import os
 import platform
@@ -64,6 +66,8 @@ class Bluebird(object):
         self.trace_rdata = {}
         self.attached = False
         self.tracing = False
+        #
+        self.tracing_error = False
         self.get_heap()
 
     def start(self):
@@ -115,25 +119,30 @@ class Bluebird(object):
         return peek
             
     def io_update(self, call, io, ncall, ncalls):
-        for fd in self.traced_results:
-            io[fd].append(self.traced_results[fd])
-        if ncall == ncalls:
-            return
-        self.create_trace_thread(io_trace, self.io_update, [call], 
-                                [call, io, ncall + 1, ncalls])
+        while self.trace_results is None and not self.tracing_error:
+            sleep(1)
+        if self.tracing:
+            raise RunningTraceError
+        for fd in self.trace_results:
+            io[fd].append(self.trace_results[fd])
+        self.start()
+        if ncall < ncalls:
+            self.create_trace_thread(iotrace, self.io_update, [call, 1], 
+                                           [call, io, ncall + 1, ncalls])
 
-    def rw_trace(self, call, ncalls=inf, non_blocking=False):
+    def rw_trace(self, call, ncalls=inf):
         ncall = 0
         io = self.rdata if call == syscalls['NR_read'] else self.wdata
-        if non_blocking:
-            self.create_trace_thread(iotrace, self.io_update, [call, 1], 
-                                    [call, io, ncall + 1, ncalls])
-            return
         while ncall < ncalls:
             io_made = iotrace(self.traced_pid, call, 0)
             for fd in io_made:
                 io[fd].append(io_made[fd])
             ncall += 1
+
+    def nb_rw_trace(self, call, ncalls):
+        io = self.rdata if call == syscalls['NR_read'] else self.wdata
+        self.create_trace_thread(iotrace, self.io_update, [call, 1], 
+                                         [call, io, 1, ncalls])
 
     def get_current_call(self):
         return get_syscall(self.traced_pid)
@@ -205,7 +214,7 @@ class Bluebird(object):
         if self.tracing:
             raise RunningTrace
         self.stop()
-        sleep(1)
+        sleep(2)
         trace_thread = TracingThread(self, func, cb, func_args, cb_args)
         trace_thread.start()
 
@@ -223,14 +232,17 @@ class TracingThread(Thread):
     def run(self):
         self.trace_obj.tracing = True
         try:
-            trace_results = self.trace_func(self.traced_pid, *self.args)
+            trace_results = self.trace_func(self.trace_obj.traced_pid, 
+                                            *self.trace_func_args)
         except:
             trace_results = None
+            self.trace_obj.trace_error = True
         finally:
             self.trace_obj.tracing = False
             self.trace_obj.trace_results = trace_results
             if self.trace_cb is not None:
                 self.trace_cb(*self.trace_cb_args)
+
 
 class RunningTraceError(BaseException):
 
