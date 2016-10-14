@@ -458,6 +458,11 @@ static PyObject *bluebird_iotrace(PyObject *self, PyObject *args)
     PyObject *io = PyDict_New();
     PyDict_SetItem(io, PyLong_FromLong(fd_key),
                        PyUnicode_FromString(words));
+
+    if (threaded) {
+        bluebird_ptrace_call(PTRACE_DETACH, pid, 0, 0);
+    }
+
     return io;
 
 error:
