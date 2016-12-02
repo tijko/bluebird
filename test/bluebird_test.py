@@ -3,7 +3,7 @@
 
 import unittest
 
-from Bluebird import *
+from bluebird import *
 
 import re
 import os
@@ -23,6 +23,8 @@ class BlueBirdTest(unittest.TestCase):
 
     def setUp(self):
         self.test_proc_filename = 'alt_print.txt'
+        if os.path.exists(self.test_proc_filename):
+            os.unlink(self.test_proc_filename)
         self.stdout = open(self.test_proc_filename, 'x')
         self.test_proc = Popen('./alt_print', stdout=self.stdout)
         self.test_proc_pid = self.test_proc.pid
