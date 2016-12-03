@@ -148,7 +148,8 @@ long bluebird_cext_ptrace_call(enum __ptrace_request req, pid_t pid,
 
     long ptrace_ret = ptrace(req, pid, addr, data);
 
-    /* corner case brought up on uber-pyflame: ptrace_ret was a peek and the data at addr was -1 */
+    /* corner case brought up on uber-pyflame: 
+     * ptrace_ret was a peek and the data at addr was -1 */
 
     if (ptrace_ret < 0) 
         return -1;
@@ -911,5 +912,8 @@ PyModuleDef bluebird_cext_module = {
     bluebird_cextmethods
 };
 
-PyMODINIT_FUNC PyInit_bluebird_cext(void) { return PyModule_Create(&bluebird_cext_module); }
+PyMODINIT_FUNC PyInit_bluebird_cext(void) 
+{ 
+    return  PyModule_Create(&bluebird_cext_module); 
+}
 
