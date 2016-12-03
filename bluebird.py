@@ -12,12 +12,28 @@ from math import inf
 from time import sleep
 from threading import Thread
 from elftools.elf.elffile import *
-from collections import defaultdict
+from collections import defaultdict, namedtuple
 
 from mmap import PROT_EXEC, PROT_READ, PROT_WRITE, \
            MAP_PRIVATE, MAP_ANONYMOUS, MAP_SHARED, \
            MAP_DENYWRITE, MAP_EXECUTABLE, PAGESIZE
 
+
+stats_tuple = namedtuple('stats', ['pid', 'comm', 'state', 'ppid', 'pgrp',
+                                   'session', 'tty_nr', 'tpgid', 'flags',
+                                   'minflt', 'cminflt', 'majflt', 'cmajflt',
+                                   'utime', 'stime', 'cutime', 'cstime',
+                                   'priority', 'nice', 'num_threads',
+                                   'iterealvalue', 'starttime', 'vsize', 'rss',
+                                   'rsslim', 'startcode', 'endcode', 
+                                   'startstack', 'kstkesp', 'kstkeip', 'signal', 
+                                   'blocked', 'sigignore', 'sigcatch', 'wchan',
+                                   'nswap', 'cnswap', 'exit_signal', 
+                                   'processor', 'rt_priority', 'policy',
+                                   'delayacct_blkio_ticks', 'guest_time',
+                                   'cguest_time', 'start_data', 'end_data',
+                                   'start_brk', 'arg_start', 'arg_end',
+                                   'env_start', 'env_end', 'exit_code'])
 
 PATH_MAX = 0xfff + 1
 
@@ -66,9 +82,9 @@ class Bluebird(object):
         self.trace_rdata = {}
         self.attached = False
         self.tracing = False
-        #
         self.tracing_error = False
         self.get_heap()
+        self.stats = self.get_stats() 
 
     def start(self):
         if self.attached:
@@ -175,6 +191,7 @@ class Bluebird(object):
         self.get_heap()
 
     def get_trace_dir(self):
+        self.get_heap()
         self.path_addr = self.heap_bounds[1]
         self.length = PATH_MAX - 1
         self.expand_heap(self.length)
@@ -201,6 +218,12 @@ class Bluebird(object):
     @property
     def name(self):
         return self._parse_status('Name')
+
+    def get_stats(self):
+        with open('/proc/{}/stat'.format(self.traced_pid)) as fh:
+            stats_raw = fh.read(4096)
+        process_stats = stats_tuple(*stats_raw.split())
+        return process_stats
 
     def _parse_status(self, field):
         with open('/proc/{}/status'.format(self.traced_pid)) as f:
