@@ -41,8 +41,10 @@ syscall_nr_path = '/usr/include/asm/unistd_{}.h'
 
 if platform.machine() == 'x86_64':
     syscall_machine = '64'
+    WORD = 8
 else:
     syscall_machine = '32'
+    WORD = 4
 
 with open(syscall_nr_path.format(syscall_machine)) as fh:
     syscalls_raw = fh.read()
@@ -133,6 +135,11 @@ class Bluebird(object):
             peek = readstring(self.traced_pid, addr, nwords)
         self.trace_rdata[addr] = peek
         return peek
+
+    def readenv(self):
+        self.stats = self.get_stats()
+        env_block = (self.stats.env_end - self.stats.env_start) // WORD
+        return self.read(self.stats.env_start, env_block)
             
     def io_update(self, call, io, ncall, ncalls):
         while self.trace_results is None and not self.tracing_error:
@@ -198,7 +205,7 @@ class Bluebird(object):
         self.get_heap()
         path = bgetcwd(self.traced_pid, self.path_addr,
                        self.length, self.heap_bounds[1])
-        words = self.length // 8
+        words = self.length // WORD
         path = readstring(self.traced_pid, self.path_addr, words)
         return path
 
@@ -222,7 +229,8 @@ class Bluebird(object):
     def get_stats(self):
         with open('/proc/{}/stat'.format(self.traced_pid)) as fh:
             stats_raw = fh.read(4096)
-        process_stats = stats_tuple(*stats_raw.split())
+        process_stats = stats_tuple(*[int(stat) if stat.isdigit() else stat 
+                                      for stat in stats_raw.split()])
         return process_stats
 
     def _parse_status(self, field):
