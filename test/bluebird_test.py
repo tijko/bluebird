@@ -80,7 +80,7 @@ class BlueBirdTest(unittest.TestCase):
         self.assertCountEqual(test_syscalls, calls)
      
     def test_find_syscall(self):
-        getsid = 124
+        getsid = syscalls['NR_getsid']
         test_find = self.bluebird.find_call(getsid, non_blocking=True)
         while self.bluebird.tracing:
             sleep(1)
@@ -121,7 +121,6 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(curr_dir, self.bluebird.get_trace_dir()) 
 
     def test_iotrace_write(self):
-        write = syscalls['NR_write']
         process_str = 'Process <{}> is running!\n'.format(self.test_proc_pid)
         self.bluebird.rw_trace(write, ncalls=4)
         for fd in self.bluebird.wdata:
@@ -137,8 +136,7 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(0, tracer_pid)
     
 if __name__ == '__main__':
-    # XXX these syscalls are defined in /usr/include/asm/unistd_64.h
-    # rewrite to allow compatibility for 32 too.
     test_pid = os.getpid()
-    test_proc_syscalls = (1, 35)
+    write, nanosleep = syscalls['NR_write'], syscalls['NR_nanosleep']
+    test_proc_syscalls = (write, nanosleep)
     unittest.main(verbosity=3)
