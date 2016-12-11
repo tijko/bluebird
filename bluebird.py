@@ -228,10 +228,12 @@ class Bluebird(object):
 
     def get_stats(self):
         with open('/proc/{}/stat'.format(self.traced_pid)) as fh:
-            stats_raw = fh.read(4096)
-        process_stats = stats_tuple(*[int(stat) if stat.isdigit() else stat 
-                                      for stat in stats_raw.split()])
-        return process_stats
+            stats_raw = fh.read()
+        name = '(\d+\s)(\(.+\)\s)(\w+\s)'
+        stat_name = [s.strip() for g in re.findall(name, stats_raw) for s in g]
+        stat_fields = [s.strip() for s in re.findall('\s-?\d+', stats_raw)]
+        return stats_tuple(*[int(stat) if stat.isdigit() else stat
+                             for stat in stat_name + stat_fields])
 
     def _parse_status(self, field):
         with open('/proc/{}/status'.format(self.traced_pid)) as f:
