@@ -136,10 +136,12 @@ class Bluebird(object):
         self.trace_rdata[addr] = peek
         return peek
 
-    def readenv(self):
+    def getenv(self):
         self.stats = self.get_stats()
-        env_block = (self.stats.env_end - self.stats.env_start) // WORD
-        return self.read(self.stats.env_start, env_block)
+        env_length = self.stats.env_end - self.stats.env_start
+        env_block = env_length // WORD
+        env_var = self.read(self.stats.env_start, env_block)
+        return dict(map(lambda s: s.split('=', 1), env_var.split('\n')))
             
     def io_update(self, call, io, ncall, ncalls):
         while self.trace_results is None and not self.tracing_error:
@@ -207,7 +209,7 @@ class Bluebird(object):
                        self.length, self.heap_bounds[1])
         words = self.length // WORD
         path = readstring(self.traced_pid, self.path_addr, words)
-        return path
+        return path.replace('\n', '')
 
     def get_sections(self, path=None, use_current=False):
         if use_current:

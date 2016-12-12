@@ -205,6 +205,10 @@ static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
  
     ptrace(PTRACE_CONT, pid, 0, 0);
 
+    for (int i=0; i < WORD * words_to_read; i++)
+        if (words[i] == '\0')
+            words[i] = '\n';
+
     words[WORD * words_to_read] = '\0';
 
     return Py_BuildValue("s", words);

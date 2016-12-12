@@ -47,7 +47,7 @@ class BlueBirdTest(unittest.TestCase):
     def test_writestring(self):
         # XXX using address from objdump -s alt_print
         # find a way to universally calculate address reading the binary
-        test_proc_addr = 0x400764
+        test_proc_addr = 0x4008a4
         test_proc_word = 'Potatoe'
         test_proc_output = 'Process <{}> is running!'.format(self.test_proc_pid)
         test_proc_newoutput = '{} <{}> is running!'.format(test_proc_word, 
@@ -65,9 +65,9 @@ class BlueBirdTest(unittest.TestCase):
     def test_readstring(self):
         # XXX using address from objdump -s alt_print
         # find a way to universally calculate address reading the binary
-        test_proc_addr = 0x400764
+        test_proc_addr = 0x4008a4
         test_proc_word = 'Process'
-        word = self.bluebird.read(test_proc_addr, 1)
+        word = self.bluebird.read(test_proc_addr, 1).strip('\n')
         self.assertEqual(test_proc_word, word)
       
     def test_get_syscall(self):
