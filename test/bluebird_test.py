@@ -9,6 +9,7 @@ import re
 import os
 from time import sleep
 from subprocess import Popen
+from elftools.elf import elffile as elf
 
 
 def parse_proc_status(pid, field):
@@ -17,6 +18,15 @@ def parse_proc_status(pid, field):
         status_raw = f.read()
     status_field = re.findall('{}:\t(.+)\n'.format(field), status_raw)
     return int(status_field[0])
+
+def find_string_address(string):
+    alt_print_fh = open('alt_print', 'rb')
+    elf_handle = elf.ELFFile(alt_print_fh)
+    data_section = elf_handle.get_section_by_name('.rodata')
+    data = data_section.data()
+    start_address = data_section.header['sh_addr']
+    section_data = ''.join(map(chr, data))
+    return start_address + section_data.find(string)
 
 
 class BlueBirdTest(unittest.TestCase):
@@ -45,9 +55,6 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(test_pid, tracer_pid)
             
     def test_writestring(self):
-        # XXX using address from objdump -s alt_print
-        # find a way to universally calculate address reading the binary
-        test_proc_addr = 0x4008a4
         test_proc_word = 'Potatoe'
         test_proc_output = 'Process <{}> is running!'.format(self.test_proc_pid)
         test_proc_newoutput = '{} <{}> is running!'.format(test_proc_word, 
@@ -63,9 +70,6 @@ class BlueBirdTest(unittest.TestCase):
         self.assertNotEqual(after_write, test_proc_output)
      
     def test_readstring(self):
-        # XXX using address from objdump -s alt_print
-        # find a way to universally calculate address reading the binary
-        test_proc_addr = 0x4008a4
         test_proc_word = 'Process'
         word = self.bluebird.read(test_proc_addr, 1).strip('\n')
         self.assertEqual(test_proc_word, word)
@@ -138,5 +142,6 @@ class BlueBirdTest(unittest.TestCase):
 if __name__ == '__main__':
     test_pid = os.getpid()
     write, nanosleep = syscalls['NR_write'], syscalls['NR_nanosleep']
+    test_proc_addr = find_string_address('Process')
     test_proc_syscalls = (write, nanosleep)
     unittest.main(verbosity=3)
