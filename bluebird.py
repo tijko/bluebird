@@ -53,8 +53,8 @@ syscalls = dict()
 
 for syscall_raw in syscalls_raw.split('\n'):
     if syscall_raw.startswith('#define __'):
-        syscall = syscall_raw.split()
-        syscalls[syscall[1].strip('__')] = int(syscall[2])
+        _, call_name, call_number = syscall_raw.split()
+        syscalls[call_name.strip('__')] = int(call_number)
 
 
 class TraceResults(object):
