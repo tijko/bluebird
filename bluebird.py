@@ -86,6 +86,7 @@ class Bluebird(object):
         self.tracing = False
         self.tracing_error = False
         self.get_heap()
+        self.stat_pattern = re.compile('(\d+\s)(\(.+\)\s)(\w+\s)((-?\d+\s?){49})')
         self.stats = self.get_stats() 
 
     def start(self):
@@ -231,11 +232,11 @@ class Bluebird(object):
     def get_stats(self):
         with open('/proc/{}/stat'.format(self.traced_pid)) as fh:
             stats_raw = fh.read()
-        name = '(\d+\s)(\(.+\)\s)(\w+\s)'
-        stat_name = [s.strip() for g in re.findall(name, stats_raw) for s in g]
-        stat_fields = [s.strip() for s in re.findall('\s-?\d+', stats_raw)]
-        return stats_tuple(*[int(stat) if stat.isdigit() else stat
-                             for stat in stat_name + stat_fields])
+        stats = re.findall(self.stat_pattern, stats_raw)[0][:-1]
+        pid, name, state = stats[:3]
+        stats = [int(pid)] + [name.strip()] + [state.strip()] + \
+                [int(i) for j in stats[3:] for i in j.split()]
+        return stats_tuple(*stats)
 
     def _parse_status(self, field):
         with open('/proc/{}/status'.format(self.traced_pid)) as f:
