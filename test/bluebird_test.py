@@ -48,6 +48,7 @@ class BlueBirdTest(unittest.TestCase):
         else:
             self.stdout.close()
         self.test_proc.kill()
+        self.test_proc.wait()
         os.unlink(self.test_proc_filename)
         
     def test_attach(self):
