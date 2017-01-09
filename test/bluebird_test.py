@@ -7,8 +7,9 @@ from bluebird import *
 
 import re
 import os
+import sys
 from time import sleep
-from subprocess import Popen
+from subprocess import Popen, PIPE
 from elftools.elf import elffile as elf
 
 
@@ -27,6 +28,19 @@ def find_string_address(string):
     start_address = data_section.header['sh_addr']
     section_data = ''.join(map(chr, data))
     return start_address + section_data.find(string)
+
+def compile_test_bin():
+    if os.path.isfile('alt_print'):
+        os.unlink('alt_print')
+    gcc_args = ['gcc', 'alt_print.c', '-o', 'alt_print', '-g', '-Wall']
+    print('Compiling test binary <alt_print>...')
+    cc = Popen(gcc_args, stdout=PIPE, stderr=PIPE, universal_newlines=True)
+    errors = cc.stderr.read()
+    if not errors:
+        return
+    print('Bad compilation!')
+    print(errors.strip('\n'))
+    sys.exit(0)
 
 
 class BlueBirdTest(unittest.TestCase):
@@ -141,8 +155,10 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(0, tracer_pid)
     
 if __name__ == '__main__':
+    compile_test_bin()
     test_pid = os.getpid()
     write, nanosleep = syscalls['NR_write'], syscalls['NR_nanosleep']
     test_proc_addr = find_string_address('Process')
     test_proc_syscalls = (write, nanosleep)
-    unittest.main(verbosity=3)
+    unittest.main(verbosity=3, exit=False)
+    os.unlink('alt_print')
