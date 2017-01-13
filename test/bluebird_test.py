@@ -139,6 +139,15 @@ class BlueBirdTest(unittest.TestCase):
         self.bluebird.get_heap()
         self.assertEqual(curr_dir, self.bluebird.get_trace_dir()) 
 
+    def test_getenv(self):
+        with open('/proc/{}/environ'.format(self.test_proc_pid)) as fh:
+            environ = fh.read()
+        environ = environ.split('\x00')
+        environ = [var for var in environ if var]
+        env_dict = dict(map(lambda s: s.split('=', 1), environ))
+        bluebird_env = self.bluebird.getenv()
+        self.assertEqual(env_dict, bluebird_env)
+
     def test_iotrace_write(self):
         process_str = 'Process <{}> is running!\n'.format(self.test_proc_pid)
         self.bluebird.rw_trace(write, ncalls=4)

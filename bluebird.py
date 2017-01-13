@@ -137,13 +137,22 @@ class Bluebird(object):
         self.trace_rdata[addr] = peek
         return peek
 
+    def get_data_strings(self):
+        # get environment var '_' before using current directory
+        if os.path.isfile('/usr/bin/{}'.format(self.name)):
+            strings = self.get_sections()['.rodata']
+        else:
+            strings = self.get_sections(use_current=True)['.rodata']
+        return ''.join([chr(i) for i in strings if i > 31 and i < 126])
+
     def getenv(self):
         self.stats = self.get_stats()
         env_length = self.stats.env_end - self.stats.env_start
         env_block = env_length // WORD
         env_var = self.read(self.stats.env_start, env_block)
-        return dict(map(lambda s: s.split('=', 1), env_var.split('\n')))
-            
+        env_var = [var for var in env_var.split('\n') if var]
+        return dict(map(lambda s: s.split('=', 1), env_var))
+
     def io_update(self, call, io, ncall, ncalls):
         while self.trace_results is None and not self.tracing_error:
             sleep(1)
@@ -223,7 +232,9 @@ class Bluebird(object):
             elfreader = ELFFile(fh)
         except:
             raise InvalidPath
-        return {s.name:s.data() for s in elfreader.iter_sections()}
+        sections = {s.name:s.data() for s in elfreader.iter_sections()}
+        fh.close()
+        return sections
 
     @property
     def name(self):
