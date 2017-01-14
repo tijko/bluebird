@@ -138,19 +138,23 @@ class Bluebird(object):
         return peek
 
     def get_data_strings(self):
-        # get environment var '_' before using current directory
         if os.path.isfile('/usr/bin/{}'.format(self.name)):
             strings = self.get_sections()['.rodata']
         else:
-            strings = self.get_sections(use_current=True)['.rodata']
-        return ''.join([chr(i) for i in strings if i > 31 and i < 126])
+            env = self.getenv()
+            if env.get('_'):
+                strings = self.get_sections(path=env.get('_'))['.rodata']
+            else:
+                strings = self.get_sections(use_current=True)['.rodata']
+        return ''.join(map(lambda s: ''.join([l for l in s if l and ord(l) > 31 
+                                                and ord(l) < 126]), strings))
 
     def getenv(self):
         self.stats = self.get_stats()
         env_length = self.stats.env_end - self.stats.env_start
-        env_block = env_length // WORD
+        env_block = (env_length // WORD) + 1
         env_var = self.read(self.stats.env_start, env_block)
-        env_var = [var for var in env_var.split('\n') if var]
+        env_var = filter(lambda s: s and '=' in s, env_var.split('\n'))
         return dict(map(lambda s: s.split('=', 1), env_var))
 
     def io_update(self, call, io, ncall, ncalls):
