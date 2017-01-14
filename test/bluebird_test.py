@@ -110,6 +110,11 @@ class BlueBirdTest(unittest.TestCase):
         test_find = self.bluebird.find_call(foo_syscall, timeout=5)
         self.assertIsNone(test_find)
 
+    def test_get_data_strings(self):
+        proc_data_strings = 'ProcessHOMEPATH%s:%s%s <%d> is running!'
+        data_strings = self.bluebird.get_data_strings()
+        self.assertEqual(proc_data_strings, data_strings)
+
     def test_bbrk(self):
         self.bluebird.get_heap()
         limit_before = self.bluebird.heap_bounds[1]

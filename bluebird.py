@@ -141,12 +141,14 @@ class Bluebird(object):
         if os.path.isfile('/usr/bin/{}'.format(self.name)):
             strings = self.get_sections()
         else:
-            env = self.getenv()
-            if env.get('_'):
-                strings = self.get_sections(path=env.get('_'))
-            else:
+            try: 
                 strings = self.get_sections(use_current=True)
-        return ''.join(map(chr, filter(lambda l: l > 31 and l < 126, strings['.rodata'])))
+            except FileNotFoundError:
+                env = self.getenv()
+                if env.get('_'):
+                    strings = self.get_sections(path=env.get('_'))
+        return ''.join(map(chr, filter(lambda l: l > 31 and l < 126, 
+                                       strings['.rodata'])))
 
     def getenv(self):
         self.stats = self.get_stats()
