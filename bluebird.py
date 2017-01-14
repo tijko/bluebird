@@ -139,15 +139,14 @@ class Bluebird(object):
 
     def get_data_strings(self):
         if os.path.isfile('/usr/bin/{}'.format(self.name)):
-            strings = self.get_sections()['.rodata']
+            strings = self.get_sections()
         else:
             env = self.getenv()
             if env.get('_'):
-                strings = self.get_sections(path=env.get('_'))['.rodata']
+                strings = self.get_sections(path=env.get('_'))
             else:
-                strings = self.get_sections(use_current=True)['.rodata']
-        return ''.join(map(lambda s: ''.join([l for l in s if l and ord(l) > 31 
-                                                and ord(l) < 126]), strings))
+                strings = self.get_sections(use_current=True)
+        return ''.join(map(chr, filter(lambda l: l > 31 and l < 126, strings['.rodata'])))
 
     def getenv(self):
         self.stats = self.get_stats()
