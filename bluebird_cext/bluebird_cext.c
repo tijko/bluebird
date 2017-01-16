@@ -759,14 +759,32 @@ static PyObject *bluebird_cext_bbrk(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
-static int open_file(pid_t pid, long heap_addr)
+static int open_file(pid_t pid, long heap_addr, int mode)
 {
-    long args[] = { SYS_open, heap_addr, O_CREAT | O_WRONLY, 
-                                         S_IXUSR | S_IWUSR };
+    long args[] = { SYS_open, heap_addr, mode }; 
     int offsets[] = { ORIG_RAX, RDI, RSI, RDX };
     int fd = insert_call(pid, args, offsets, 4, heap_addr);
 
     return fd;
+}
+
+static PyObject *bluebird_cext_redirect_fd(PyObject *self, PyObject *args)
+{
+    int pid, dupfd, mode;
+    long addr, heap;
+
+    if (!PyArg_ParseTuple(args, "iikik:redirect_fd", 
+                          &pid, &dupfd, &addr, &mode, &heap))
+        return NULL;
+
+    int fd = open_file(pid, addr, mode);
+
+    long call_args[] = { SYS_dup2, fd, dupfd };
+    int offsets[] = { ORIG_RAX, RDI, RSI };
+
+    insert_call(pid, call_args, offsets, 3, heap); 
+
+    Py_RETURN_NONE;
 }
 
 static int create_mmap_file(pid_t pid, char *path, long heap)
@@ -782,7 +800,8 @@ static int create_mmap_file(pid_t pid, char *path, long heap)
         if (bluebird_cext_write(pid, curr_addr, path_words[i]) < 0)
             return -1;
 
-    int fd_map = open_file(pid, heap_addr);
+    int fd_map = open_file(pid, heap_addr, O_CREAT | O_WRONLY | 
+                                           S_IXUSR | S_IWUSR);
 
     if (fd_map < 0 || find_syscall_exit(pid) < 0)
         return -1;
@@ -905,6 +924,8 @@ static PyMethodDef bluebird_cextmethods[] = {
      "finds the current directory for the traced process"},
     {"iotrace", bluebird_cext_iotrace, METH_VARARGS,
      "captures read/write calls returning register values"},
+    {"redirect_fd", bluebird_cext_redirect_fd, METH_VARARGS,
+     "redirects the pass a file-descriptor with another passed"},
     {NULL, NULL, 0, NULL}
 };
 

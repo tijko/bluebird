@@ -112,11 +112,13 @@ class BlueBirdTest(unittest.TestCase):
 
     def test_get_data_strings(self):
         proc_data_strings = 'ProcessHOMEPATH%s:%s%s <%d> is running!'
+        sleep(1)
         data_strings = self.bluebird.get_data_strings()
         self.assertEqual(proc_data_strings, data_strings)
 
     def test_bbrk(self):
         self.bluebird.get_heap()
+        sleep(1)
         limit_before = self.bluebird.heap_bounds[1]
         brk_inc_size = 0xffff
         self.bluebird.expand_heap(brk_inc_size)
@@ -126,6 +128,7 @@ class BlueBirdTest(unittest.TestCase):
 
     def test_bmmap_anon(self):
         self.bluebird.get_heap()
+        sleep(1)
         self.bluebird.create_mmap(0, PAGESIZE, PROT_EXEC | PROT_WRITE,
                 MAP_ANONYMOUS | MAP_SHARED, 0)
         self.bluebird.get_maps()
@@ -133,6 +136,7 @@ class BlueBirdTest(unittest.TestCase):
 
     def test_bmmap_file(self):
         self.bluebird.get_heap()
+        sleep(1)
         self.bluebird.create_mmap(0, PAGESIZE, PROT_EXEC | PROT_WRITE,
                 MAP_ANONYMOUS | MAP_SHARED, 0, path='/tmp/bluebird')
         self.bluebird.get_maps()
@@ -144,6 +148,15 @@ class BlueBirdTest(unittest.TestCase):
         cdir = os.getcwd() 
         fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 'alt_print.txt'), '2':pts}
         self.assertEqual(fd_dict, self.bluebird.get_fds())
+
+    def test_redirect_fd(self):
+        sleep(1)
+        output_size_before = os.stat('alt_print.txt').st_size
+        redirect_file = '{}/redirect.txt'.format(os.getcwd())
+        self.bluebird.redirect_fd(1, redirect_file)
+        output_size_after = os.stat('alt_print.txt').st_size
+        self.assertEqual(output_size_before, output_size_after)
+        self.assertNotEqual(os.stat(redirect_file).st_size, 0)
 
     def test_get_trace_dir(self):
         cdir = os.getcwd()

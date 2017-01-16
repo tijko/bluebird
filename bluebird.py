@@ -220,8 +220,14 @@ class Bluebird(object):
         return {fd:os.readlink(base.format(self.traced_pid, fd)) for 
                 fd in os.listdir(fd_dir)}
 
-    def redirect_fd(self, fd):
-        pass
+    def redirect_fd(self, fd, path, mode=os.O_WRONLY):
+        if not os.path.isfile(path):
+            mode |= os.O_CREAT
+        string_addr = self.heap_bounds[1]
+        self.expand_heap(PATH_MAX)
+        self.get_heap()
+        writestring(self.traced_pid, string_addr, path)
+        redirect_fd(self.traced_pid, fd, string_addr, mode, self.heap_bounds[1])
 
     def get_trace_dir(self):
         self.get_heap()
