@@ -139,10 +139,16 @@ class BlueBirdTest(unittest.TestCase):
         sleep(1)
         self.assertIsNotNone(self.bluebird.maps.get('(deleted)'))
 
+    def test_get_fds(self):
+        pts = '/dev/pts/{}'.format(self.bluebird.stats.tty_nr & 0xff)
+        cdir = os.getcwd() 
+        fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 'alt_print.txt'), '2':pts}
+        self.assertEqual(fd_dict, self.bluebird.get_fds())
+
     def test_get_trace_dir(self):
-        curr_dir = os.getcwd()
+        cdir = os.getcwd()
         self.bluebird.get_heap()
-        self.assertEqual(curr_dir, self.bluebird.get_trace_dir()) 
+        self.assertEqual(cdir, self.bluebird.get_trace_dir()) 
 
     def test_getenv(self):
         with open('/proc/{}/environ'.format(self.test_proc_pid)) as fh:

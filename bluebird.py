@@ -214,6 +214,15 @@ class Bluebird(object):
         bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, path)
         self.get_heap()
 
+    def get_fds(self):
+        base = '/proc/{}/fd/{}'
+        fd_dir = base.format(self.traced_pid, '')
+        return {fd:os.readlink(base.format(self.traced_pid, fd)) for 
+                fd in os.listdir(fd_dir)}
+
+    def redirect_fd(self, fd):
+        pass
+
     def get_trace_dir(self):
         self.get_heap()
         self.path_addr = self.heap_bounds[1]
