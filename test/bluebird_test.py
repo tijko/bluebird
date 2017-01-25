@@ -140,22 +140,21 @@ class BlueBirdTest(unittest.TestCase):
         self.bluebird.create_mmap(0, PAGESIZE, PROT_EXEC | PROT_WRITE,
                 MAP_ANONYMOUS | MAP_SHARED, 0, path='/tmp/bluebird')
         self.bluebird.get_maps()
-        sleep(1)
         self.assertIsNotNone(self.bluebird.maps.get('(deleted)'))
 
     def test_get_fds(self):
         pts = '/dev/pts/{}'.format(self.bluebird.stats.tty_nr & 0xff)
         cdir = os.getcwd() 
-        fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 'alt_print.txt'), '2':pts}
+        fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 
+                   self.test_proc_filename), '2':pts}
         self.assertEqual(fd_dict, self.bluebird.get_fds())
 
     def test_redirect_fd(self):
-        sleep(1)
-        output_size_before = os.stat('alt_print.txt').st_size
+        self.bluebird.get_heap()
         redirect_file = '{}/redirect.txt'.format(os.getcwd())
+        sleep(1)
         self.bluebird.redirect_fd(1, redirect_file)
-        output_size_after = os.stat('alt_print.txt').st_size
-        self.assertEqual(output_size_before, output_size_after)
+        sleep(1)
         self.assertNotEqual(os.stat(redirect_file).st_size, 0)
 
     def test_get_trace_dir(self):
@@ -195,3 +194,4 @@ if __name__ == '__main__':
     test_proc_syscalls = (write, nanosleep)
     unittest.main(verbosity=3, exit=False)
     os.unlink('alt_print')
+    os.unlink('redirect.txt')

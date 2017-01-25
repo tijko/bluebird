@@ -30,6 +30,30 @@ static void bluebird_cext_handle_error(void)
 
     switch (errno) {
 
+        case (EACCES):
+            message_str = "EACCES";
+            break;
+        case (EBADF):
+            message_str = "EBADF";
+            break;
+        case (EMFILE):
+            message_str = "EMFILE";
+            break;
+        case (ENODEV):
+            message_str = "ENODEV";
+            break;
+        case (ENOMEM):
+            message_str = "ENOMEM";
+            break;
+        case (ENOTSUP):
+            message_str = "ENOTSUP";
+            break;
+        case (ENXIO):
+            message_str = "ENXIO";
+            break;
+        case (EOVERFLOW):
+            message_str = "EOVERFLOW";
+            break;    
         case (EBUSY): 
             message_str = "EBUSY";
             break;
@@ -57,6 +81,8 @@ static void bluebird_cext_handle_error(void)
         case (EAGAIN):
             exception = PyExc_BlockingIOError;
             break;
+        default:
+            message_str = "UNKNOWN";
     }
 
     if (!exception) {
