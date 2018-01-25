@@ -6,6 +6,13 @@ try:
 except ImportError:
     from distutils.core import setup, Extension
 
+import sys, platform
+
+
+if platform.system() != 'Linux':
+    print('Invalid Platform, must be Linux-based system...exiting setup')
+    sys.exit(1)
+
 
 setup( 
     name='bluebird',
