@@ -46,8 +46,11 @@ else:
     syscall_machine = '32'
     WORD = 4
 
-with open(syscall_nr_path.format(syscall_machine)) as fh:
-    syscalls_raw = fh.read()
+try:
+    with open(syscall_nr_path.format(syscall_machine)) as fh:
+        syscalls_raw = fh.read()
+except FileNotFoundError:
+    raise IncompatibleArchitecture
 
 syscalls = dict()
 
@@ -55,6 +58,9 @@ for syscall_raw in syscalls_raw.split('\n'):
     if syscall_raw.startswith('#define __'):
         _, call_name, call_number = syscall_raw.split()
         syscalls[call_name.strip('__')] = int(call_number)
+
+if syscalls.get('NR_ptrace') is None:
+    raise PtraceCallNotFoundError
 
 
 class TraceResults(object):
@@ -333,3 +339,16 @@ class InvalidPath(BaseException):
 
     def __str__(self):
         return 'Invalid executable path'
+
+
+class IncompatibleArchitecture(BaseException):
+
+    def __str__(self):
+        return 'Incompatible Architecture'
+
+
+class PtraceCallNotFound(BaseException):
+
+    def __str__(self):
+        return 'Ptrace syscall not found'
+
