@@ -94,6 +94,10 @@ class Bluebird(object):
         self.get_heap()
         self.stat_pattern = re.compile('(\d+\s)(\(.+\)\s)(\w+\s)((-?\d+\s?){49})')
         self.stats = self.get_stats() 
+        try:
+            self.exe_path = os.readlink('/proc/{}/exe'.format(self.traced_pid))
+        except FileNotFoundError:
+            raise ProcessNotFound
 
     def start(self):
         if self.attached:
@@ -116,16 +120,18 @@ class Bluebird(object):
         self.heap_bounds = self.parse_heap_map(self.maps.get('[heap]'))
 
     def get_maps(self):
+        # XXX expand data-structure
         with open('/proc/{}/maps'.format(self.traced_pid)) as fh:
             raw_map_data = fh.readlines()
-        self.maps = {}
+        self.maps = defaultdict(list)
         for _map in raw_map_data:
-            self.maps[_map.split()[-1].strip('\n')] = _map.split()[0]
+            _map = _map.split()
+            name, addr = _map[-1].strip('\n'), _map[0].split('-')
+            self.maps[name].append(addr)
 
     def parse_heap_map(self, heap_map):
         if heap_map is None: return None
-        address_range = heap_map.split()[0]
-        start, stop = address_range.split('-')
+        start, stop = heap_map[0]
         return int(start, 16), int(stop, 16)
  
     def write(self, addr, data):
@@ -144,15 +150,8 @@ class Bluebird(object):
         return peek
 
     def get_data_strings(self):
-        if os.path.isfile('/usr/bin/{}'.format(self.name)):
-            strings = self.get_sections()
-        else:
-            try: 
-                strings = self.get_sections(use_current=True)
-            except FileNotFoundError:
-                env = self.getenv()
-                if env.get('_'):
-                    strings = self.get_sections(path=env.get('_'))
+        elf_data = self.getelf_data()
+        strings = {s.name:s.data() for s in elf_data.iter_sections()}
         return ''.join(map(chr, filter(lambda l: l > 31 and l < 126, 
                                        strings['.rodata'])))
 
@@ -247,20 +246,21 @@ class Bluebird(object):
         path = readstring(self.traced_pid, self.path_addr, words)
         return path.replace('\n', '')
 
-    def get_sections(self, path=None, use_current=False):
-        if use_current:
-            cdir = self.get_trace_dir()
-            path = os.path.join(cdir, self.name)
-        elif path is None:    
-            path = os.path.join('/usr/bin/', self.name)
-        fh = open(path, 'rb')
+    def getelf_data(self):
+        fh = open(self.exe_path, 'rb')
         try:
             elfreader = ELFFile(fh)
         except:
             raise InvalidPath
-        sections = {s.name:s.data() for s in elfreader.iter_sections()}
-        fh.close()
-        return sections
+        return elfreader
+
+    def restart(self):
+        elf = self.getelf_data()
+        symtab = elf.get_section_by_name('.symtab')
+        mainsym = symtab.get_symbol_by_name('main')[0]
+        self.get_maps()
+        goinit(self.traced_pid, mainsym.entry.st_value + 
+                     int(self.maps[self.exe_path][0][0], 16))
 
     @property
     def name(self):
@@ -315,6 +315,12 @@ class TracingThread(Thread):
             self.trace_obj.trace_results = trace_results
             if self.trace_cb is not None:
                 self.trace_cb(*self.trace_cb_args)
+
+
+class ProcessNotFound(BaseException):
+
+    def __str__(self):
+        return 'Process not found'
 
 
 class RunningTraceError(BaseException):

@@ -557,6 +557,31 @@ static long *create_wordsize_array(char *data)
     return words;
 }
 
+static int reset_ip(pid_t pid, struct user_regs_struct *rg)
+{
+    if (ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
+        bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
+        return -1;
+    }
+
+    return 0;
+}
+
+static PyObject *bluebird_cext_goinit(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    unsigned const long addr;
+
+    if (!PyArg_ParseTuple(args, "ik:goinit", &pid, &addr))
+        return NULL;
+
+    struct user_regs_struct rg = { .rip=addr };
+
+    reset_ip(pid, &rg);
+
+    Py_RETURN_NONE;
+}
+
 static long bluebird_cext_write(pid_t pid, unsigned const long addr, 
                                       unsigned const long data)
 {
@@ -702,16 +727,6 @@ static int find_syscall_entrance(pid_t pid)
     }
 
     return -1;
-}
-
-static int reset_ip(pid_t pid, struct user_regs_struct *rg)
-{
-    if (ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
-        bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
-        return -1;
-    }
-
-    return 0;
 }
 
 static unsigned long long insert_call(pid_t pid, long *args, int *offsets, 
@@ -952,6 +967,8 @@ static PyMethodDef bluebird_cextmethods[] = {
      "captures read/write calls returning register values"},
     {"redirect_fd", bluebird_cext_redirect_fd, METH_VARARGS,
      "redirects the pass a file-descriptor with another passed"},
+    {"goinit", bluebird_cext_goinit, METH_VARARGS,
+     "calls the process _init"},
     {NULL, NULL, 0, NULL}
 };
 
