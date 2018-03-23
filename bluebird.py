@@ -150,10 +150,10 @@ class Bluebird(object):
         return peek
 
     def get_data_strings(self):
-        elf_data = self.getelf_data()
-        strings = {s.name:s.data() for s in elf_data.iter_sections()}
+        rodata = self.getelf_section('.rodata')
+        if rodata is None: raise ElfSectionNotFound
         return ''.join(map(chr, filter(lambda l: l > 31 and l < 126, 
-                                       strings['.rodata'])))
+                                                    rodata.data())))
 
     def getenv(self):
         self.stats = self.get_stats()
@@ -246,17 +246,18 @@ class Bluebird(object):
         path = readstring(self.traced_pid, self.path_addr, words)
         return path.replace('\n', '')
 
-    def getelf_data(self):
+    def getelf_section(self, section):
         fh = open(self.exe_path, 'rb')
         try:
             elfreader = ELFFile(fh)
-        except:
+        except FileNotFoundError:
             raise InvalidPath
-        return elfreader
+        sections = {s.name:s for s in elfreader.iter_sections()}
+        return sections.get(section)
 
     def restart(self):
-        elf = self.getelf_data()
-        symtab = elf.get_section_by_name('.symtab')
+        symtab = self.getelf_section('.symtab')
+        if symtab is None: raise ElfSectionNotFound
         mainsym = symtab.get_symbol_by_name('main')[0]
         self.get_maps()
         goinit(self.traced_pid, mainsym.entry.st_value + 
@@ -315,6 +316,12 @@ class TracingThread(Thread):
             self.trace_obj.trace_results = trace_results
             if self.trace_cb is not None:
                 self.trace_cb(*self.trace_cb_args)
+
+
+class ElfSectionNotFound(BaseException):
+
+    def __str__(self):
+        return 'Elf section not found'
 
 
 class ProcessNotFound(BaseException):

@@ -286,7 +286,7 @@ static int *get_syscalls(pid_t pid, int nsyscalls, int enter, bool signal_cont)
 
         //  checking the restart_call kernel syscall after SIGSTP
         //  orig_rax mask against 0x80 SIGTRAP for info on entry/exit?
-        if ((rgs.orig_rax == 219 && enter) || rgs.rax == -ENOSYS)
+        if ((rgs.orig_rax == 219 && enter) || (signed) rgs.rax == -ENOSYS)
             continue;
 
         calls[syscalls_made++] = rgs.orig_rax;
@@ -704,7 +704,7 @@ static struct user_regs_struct *set_rip_local(pid_t pid, long heap_addr)
         if (set_sys_step(pid, PTRACE_SINGLESTEP) < 0 ||
             ptrace(PTRACE_GETREGS, pid, 0, rg) < 0)
             return NULL;
-        else if (rg->rip < heap_addr)
+        else if ((signed) rg->rip < heap_addr)
             break;
     }
 
