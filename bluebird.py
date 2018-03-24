@@ -255,6 +255,16 @@ class Bluebird(object):
         sections = {s.name:s for s in elfreader.iter_sections()}
         return sections.get(section)
 
+    def getsyms(self):
+        syms = self.getelf_section('.symtab')
+        if syms is None: raise ElfSectionNotFound
+        symtab = defaultdict(list)
+        for sym in syms.iter_symbols():
+            type_entry = symtab[sym.entry['st_info']['type']]
+            idx = len(type_entry)
+            type_entry.append((idx, sym.name, hex(sym.entry['st_value'])))
+        return symtab
+
     def restart(self):
         symtab = self.getelf_section('.symtab')
         if symtab is None: raise ElfSectionNotFound
