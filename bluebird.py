@@ -91,6 +91,7 @@ class Bluebird(object):
         self.attached = False
         self.tracing = False
         self.tracing_error = False
+        self.elf_handle = None
         self.get_heap()
         self.stat_pattern = re.compile('(\d+\s)(\(.+\)\s)(\w+\s)((-?\d+\s?){49})')
         self.stats = self.get_stats() 
@@ -247,13 +248,14 @@ class Bluebird(object):
         return path.replace('\n', '')
 
     def getelf_section(self, section):
-        fh = open(self.exe_path, 'rb')
+        self.elf_handle = open(self.exe_path, 'rb')
         try:
-            elfreader = ELFFile(fh)
+            elfreader = ELFFile(self.elf_handle)
         except FileNotFoundError:
             raise InvalidPath
         sections = {s.name:s for s in elfreader.iter_sections()}
-        return sections.get(section)
+        elf_section = sections.get(section)
+        return elf_section
 
     def getsyms(self):
         syms = self.getelf_section('.symtab')
