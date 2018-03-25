@@ -21,11 +21,12 @@ def parse_proc_status(pid, field):
     return int(status_field[0])
 
 def find_string_address(string):
-    alt_print_fh = open('alt_print', 'rb')
-    elf_handle = elf.ELFFile(alt_print_fh)
-    data_section = elf_handle.get_section_by_name('.rodata')
-    data = data_section.data()
-    start_address = data_section.header['sh_addr']
+    # XXX add-in offset grab (ie the aslr of rodata?)
+    with open('alt_print', 'rb') as alt_print_fh:
+        elf_handle = elf.ELFFile(alt_print_fh)
+        data_section = elf_handle.get_section_by_name('.rodata')
+        data = data_section.data()
+        start_address = data_section.header['sh_addr']
     section_data = ''.join(map(chr, data))
     return start_address + section_data.find(string)
 
@@ -61,6 +62,8 @@ class BlueBirdTest(unittest.TestCase):
             self.test_proc.stdout.close()
         else:
             self.stdout.close()
+        if self.bluebird.elf_handle is not None:
+            self.bluebird.elf_handle.close()
         self.test_proc.kill()
         self.test_proc.wait()
         os.unlink(self.test_proc_filename)
@@ -111,7 +114,7 @@ class BlueBirdTest(unittest.TestCase):
         self.assertIsNone(test_find)
 
     def test_get_data_strings(self):
-        proc_data_strings = 'ProcessHOMEPATH%s:%s%s <%d> is running!'
+        proc_data_strings = 'ProcessHOMEPATH%s:%sStarting...%s <%d> is running!'
         sleep(1)
         data_strings = self.bluebird.get_data_strings()
         self.assertEqual(proc_data_strings, data_strings)
