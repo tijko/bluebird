@@ -583,7 +583,7 @@ static PyObject *bluebird_cext_goinit(PyObject *self, PyObject *args)
 }
 
 static long bluebird_cext_write(pid_t pid, unsigned const long addr, 
-                                      unsigned const long data)
+                                           unsigned const long data)
 {
     long write_ret = bluebird_cext_ptrace_call(PTRACE_POKEDATA, pid, addr, data); 
 
@@ -604,8 +604,10 @@ static PyObject *bluebird_cext_writeint(PyObject *self, PyObject *args)
 
     long writeint = bluebird_cext_write(pid, addr, wr_data);
 
-    if (writeint < 0)
+    if (writeint < 0) {
+        bluebird_cext_handle_error();
         return NULL;
+    }
 
     Py_RETURN_NONE;
 }
@@ -631,8 +633,11 @@ static PyObject *bluebird_cext_writestring(PyObject *self, PyObject *args)
     */
     
     for (int i=0; words[i] != 0; i++) {
-        if (bluebird_cext_write(pid, addr, words[i]) < 0)
+        if (bluebird_cext_write(pid, addr, words[i]) < 0) {
+            bluebird_cext_handle_error();
             return NULL;
+        }
+
         addr += WORD;
     }
 
@@ -673,8 +678,10 @@ static PyObject *bluebird_cext_signal(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ii:signal", &pid, &ptrace_signal)) 
         return NULL;
 
-    if (bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) 
+    if (bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) { 
+        bluebird_cext_handle_error();
         return NULL;
+    }
 
     Py_RETURN_NONE;
 }
@@ -809,6 +816,19 @@ static int open_file(pid_t pid, long heap_addr, int mode)
     return fd;
 }
 
+static PyObject *bluebird_cext_openfd(PyObject *self, PyObject *args)
+{
+    int pid, mode;
+    long addr;
+
+    if (!PyArg_ParseTuple(args, "iik:openfd", &pid, &mode, &addr))
+        return NULL;
+
+    int fd = open_file(pid, addr, mode);
+
+    return PyLong_FromLong(fd);
+}
+
 static PyObject *bluebird_cext_redirect_fd(PyObject *self, PyObject *args)
 {
     int pid, dupfd, mode;
@@ -828,49 +848,15 @@ static PyObject *bluebird_cext_redirect_fd(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 }
 
-static int create_mmap_file(pid_t pid, char *path, long heap)
-{
-    if (set_break(pid, heap, heap + 0xffff) < 0)
-        return -1;
-
-    long *path_words = create_wordsize_array(path);
-    long heap_addr = heap - ((strlen(path) + 1) * WORD);
-    long curr_addr = heap_addr;
-
-    for (int i=0; path_words[i] != 0; i++, curr_addr+=WORD) 
-        if (bluebird_cext_write(pid, curr_addr, path_words[i]) < 0)
-            return -1;
-
-    int fd_map = open_file(pid, heap_addr, O_CREAT | O_WRONLY | 
-                                           S_IXUSR | S_IWUSR);
-
-    if (fd_map < 0 || find_syscall_exit(pid) < 0)
-        return -1;
-
-    return fd_map;
-}
-
 static PyObject *bluebird_cext_bmmap(PyObject *self, PyObject *args)
 {
     long mmap_addr, length, heap_addr;
-    int pid, prot, flags, offset;
-    char *path;
+    int pid, prot, flags, offset, fd;
 
-    if (!PyArg_ParseTuple(args, "illiiilz:bmmap", &pid, &mmap_addr, &length, 
+    if (!PyArg_ParseTuple(args, "illiiili:bmmap", &pid, &mmap_addr, &length, 
                                                   &prot, &flags, &offset, 
-                                                  &heap_addr, &path))
+                                                  &heap_addr, &fd))
         return NULL;
-
-    int fd = 0;
-
-    if (path != NULL) {
-        fd = create_mmap_file(pid, path, heap_addr);
-
-        if (fd < 0) {
-            bluebird_cext_handle_error();
-            return NULL;
-        }
-    }
 
     long _args[] = { SYS_mmap, mmap_addr, length, prot, fd, offset, flags };
     int offsets[] = { ORIG_RAX, RDI, RSI, RDX, R8, R9, R10 };
@@ -903,22 +889,23 @@ static PyObject *bluebird_cext_attach(PyObject *self, PyObject *args)
 
     if (!is_traceable()) {
         errno = EPERM;
-        bluebird_cext_handle_error();
-        return NULL;
+        goto fallout;
     }
 
     if (!PyArg_ParseTuple(args, "i:attach", &pid)) 
         return NULL;
 
-    if (bluebird_cext_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) {
-        bluebird_cext_handle_error();
-        return NULL;
-    }
+    if (bluebird_cext_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
+        goto fallout;
 
-    if (bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) 
-        return NULL;
+    if (bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)  
+        goto fallout;
 
     Py_RETURN_NONE;
+
+fallout:
+    bluebird_cext_handle_error();
+    return NULL;
 }
 
 static PyObject *bluebird_cext_detach(PyObject *self, PyObject *args)
@@ -928,8 +915,10 @@ static PyObject *bluebird_cext_detach(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i:detach", &pid)) 
         return NULL;
 
-    if (bluebird_cext_ptrace_call(PTRACE_DETACH, pid, 0, 0) < 0)
+    if (bluebird_cext_ptrace_call(PTRACE_DETACH, pid, 0, 0) < 0) {
+        bluebird_cext_handle_error();
         return NULL;
+    }
 
     Py_RETURN_NONE;
 }
@@ -969,6 +958,8 @@ static PyMethodDef bluebird_cextmethods[] = {
      "redirects the pass a file-descriptor with another passed"},
     {"goinit", bluebird_cext_goinit, METH_VARARGS,
      "calls the process _init"},
+    {"openfd", bluebird_cext_openfd, METH_VARARGS,
+     "open and returns file descriptor"},
     {NULL, NULL, 0, NULL}
 };
 

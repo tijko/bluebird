@@ -21,7 +21,6 @@ def parse_proc_status(pid, field):
     return int(status_field[0])
 
 def find_string_address(string):
-    # XXX add-in offset grab (ie the aslr of rodata?)
     with open('alt_print', 'rb') as alt_print_fh:
         elf_handle = elf.ELFFile(alt_print_fh)
         data_section = elf_handle.get_section_by_name('.rodata')
@@ -33,7 +32,7 @@ def find_string_address(string):
 def compile_test_bin():
     if os.path.isfile('alt_print'):
         os.unlink('alt_print')
-    gcc_args = ['gcc', 'alt_print.c', '-o', 'alt_print', '-g', '-Wall']
+    gcc_args = ['gcc', 'alt_print.c', '-o', 'alt_print', '-g', '-static', '-Wall']
     print('Compiling test binary <alt_print>...')
     cc = Popen(gcc_args, stdout=PIPE, stderr=PIPE, universal_newlines=True)
     errors = cc.stderr.read()
@@ -118,7 +117,7 @@ class BlueBirdTest(unittest.TestCase):
         sleep(1)
         data_strings = self.bluebird.get_data_strings()
         self.assertEqual(proc_data_strings, data_strings)
-
+    
     def test_bbrk(self):
         self.bluebird.get_heap()
         sleep(1)
@@ -151,7 +150,7 @@ class BlueBirdTest(unittest.TestCase):
         fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 
                    self.test_proc_filename), '2':pts}
         self.assertEqual(fd_dict, self.bluebird.get_fds())
-
+    
     def test_redirect_fd(self):
         self.bluebird.get_heap()
         redirect_file = '{}/redirect.txt'.format(os.getcwd())
@@ -164,7 +163,7 @@ class BlueBirdTest(unittest.TestCase):
         cdir = os.getcwd()
         self.bluebird.get_heap()
         self.assertEqual(cdir, self.bluebird.get_trace_dir()) 
-
+    
     def test_getenv(self):
         with open('/proc/{}/environ'.format(self.test_proc_pid)) as fh:
             environ = fh.read()
@@ -197,4 +196,4 @@ if __name__ == '__main__':
     test_proc_syscalls = (write, nanosleep)
     unittest.main(verbosity=3, exit=False)
     os.unlink('alt_print')
-    os.unlink('redirect.txt')
+    #os.unlink('redirect.txt')
