@@ -194,6 +194,9 @@ class Bluebird(object):
     def get_current_call(self):
         return get_syscall(self.traced_pid)
 
+    def cont_trace(self):
+        continue_trace(self.traced_pid)
+
     def get_ranged_syscalls(self, nsyscalls):
         # this allows the tracer get a consecutive count
         # syscalls without allowing any calls to slip by

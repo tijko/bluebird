@@ -160,7 +160,7 @@ static bool is_stopped(pid_t pid)
 
     return pid_state;
 }
-
+// name mangling??
 long bluebird_cext_ptrace_call(enum __ptrace_request req, pid_t pid, 
                           unsigned long addr, long data)
 {
@@ -204,6 +204,18 @@ static long bluebird_cext_read(pid_t pid, unsigned const long addr)
         return -1;
 
     return peek_data;
+}
+
+static PyObject *bluebird_cext_continue_trace(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+
+    if (!PyArg_ParseTuple(args, "i:continue_trace", &pid))
+        return NULL;
+
+    bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0);
+    
+    Py_RETURN_NONE;
 }
 
 static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
@@ -780,16 +792,6 @@ error:
     return -1;
 }
 
-static long set_break(pid_t pid, long brk_addr, long heap_addr)
-{
-    long args[] = { SYS_brk, brk_addr };
-    int offsets[] = { ORIG_RAX, RDI };
-
-    int rax = insert_call(pid, args, offsets, 2, heap_addr);
-
-    return rax;
-}
-
 static PyObject *bluebird_cext_bbrk(PyObject *self, PyObject *args)
 {
     int pid;
@@ -799,10 +801,10 @@ static PyObject *bluebird_cext_bbrk(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ill:bbrk", &pid, &brk_addr, &heap_addr)) 
         return NULL;
 
-    if (set_break(pid, brk_addr, heap_addr) < 0) {
-        bluebird_cext_handle_error();
-        return NULL;
-    }
+    long _args[] = { SYS_brk, brk_addr };
+    int offsets[] = { ORIG_RAX, RDI };
+
+    insert_call(pid, _args, offsets, 2, heap_addr);
 
     Py_RETURN_NONE;
 }
@@ -960,6 +962,8 @@ static PyMethodDef bluebird_cextmethods[] = {
      "calls the process _init"},
     {"openfd", bluebird_cext_openfd, METH_VARARGS,
      "open and returns file descriptor"},
+    {"continue_trace", bluebird_cext_continue_trace, METH_VARARGS,
+     "sends a continue signal to a stopped traced process"},
     {NULL, NULL, 0, NULL}
 };
 

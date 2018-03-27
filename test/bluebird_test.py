@@ -13,12 +13,25 @@ from subprocess import Popen, PIPE
 from elftools.elf import elffile as elf
 
 
+def get_dir(pid):
+    proc_exe = '/proc/{}/exe'.format(pid)
+    return os.readlink(proc_exe)
+
+def parse_proc_file(pid, filename):
+    with open('/proc/{}/{}'.format(pid, filename)) as fh:
+        proc_data = fh.read()
+    return proc_data
+
 def parse_proc_status(pid, field):
-    proc_pid_path = '/proc/{}/status'.format(pid)
-    with open(proc_pid_path) as f:
-        status_raw = f.read()
-    status_field = re.findall('{}:\t(.+)\n'.format(field), status_raw)
+    proc_status = parse_proc_file(pid, 'status')
+    status_field = re.findall('{}:\t(.+)\n'.format(field), proc_status)
     return int(status_field[0])
+
+def parse_proc_maps(pid):
+    proc_maps = parse_proc_file(pid, 'maps')
+    map_lines = [ln.split() for ln in proc_maps.split('\n') if ln]
+    maps = {ln[-1]:ln[0] for ln in map_lines}
+    return maps
 
 def find_string_address(string):
     with open('alt_print', 'rb') as alt_print_fh:
@@ -32,7 +45,7 @@ def find_string_address(string):
 def compile_test_bin():
     if os.path.isfile('alt_print'):
         os.unlink('alt_print')
-    gcc_args = ['gcc', 'alt_print.c', '-o', 'alt_print', '-g', '-static', '-Wall']
+    gcc_args = ['gcc', 'alt_print.c', '-o', 'alt_print', '-g', '-Wall']
     print('Compiling test binary <alt_print>...')
     cc = Popen(gcc_args, stdout=PIPE, stderr=PIPE, universal_newlines=True)
     errors = cc.stderr.read()
@@ -50,11 +63,10 @@ class BlueBirdTest(unittest.TestCase):
         if os.path.exists(self.test_proc_filename):
             os.unlink(self.test_proc_filename)
         self.stdout = open(self.test_proc_filename, 'x')
-        self.test_proc = Popen('./alt_print', stdout=self.stdout)
+        self.test_proc = Popen(['./alt_print'], stdout=self.stdout)
         self.test_proc_pid = self.test_proc.pid
         self.bluebird = Bluebird(self.test_proc_pid)
         self.bluebird.start()
-        sleep(1)
 
     def tearDown(self):
         if self.test_proc.stdout is not None:
@@ -76,19 +88,20 @@ class BlueBirdTest(unittest.TestCase):
         test_proc_output = 'Process <{}> is running!'.format(self.test_proc_pid)
         test_proc_newoutput = '{} <{}> is running!'.format(test_proc_word, 
                                                            self.test_proc_pid)
-        self.bluebird.write(test_proc_addr, test_proc_word)
-        sleep(2)
+        text_addr = int(self.bluebird.maps[self.bluebird.exe_path][0][0], 16)
+        self.bluebird.write(test_proc_addr + text_addr, test_proc_word)
+        sleep(1)
         with open(self.test_proc_filename) as test_file:
             proc_output = test_file.read()
         proc_output_lines = list(filter(None, proc_output.split('\n')))
-        before_write = proc_output_lines[0]
         after_write = proc_output_lines[-1]
         self.assertEqual(after_write, test_proc_newoutput)
         self.assertNotEqual(after_write, test_proc_output)
-     
+    
     def test_readstring(self):
         test_proc_word = 'Process'
-        word = self.bluebird.read(test_proc_addr, 1).strip('\n')
+        text_addr = int(self.bluebird.maps[self.bluebird.exe_path][0][0], 16)
+        word = self.bluebird.read(test_proc_addr + text_addr, 1).strip('\n')
         self.assertEqual(test_proc_word, word)
       
     def test_get_syscall(self):
@@ -117,17 +130,17 @@ class BlueBirdTest(unittest.TestCase):
         sleep(1)
         data_strings = self.bluebird.get_data_strings()
         self.assertEqual(proc_data_strings, data_strings)
-    
+     
     def test_bbrk(self):
         self.bluebird.get_heap()
-        sleep(1)
         limit_before = self.bluebird.heap_bounds[1]
-        brk_inc_size = 0xffff
+        brk_inc_size = 0x1000
+        self.bluebird.cont_trace()
+        sleep(5)
         self.bluebird.expand_heap(brk_inc_size)
-        sleep(1)
         limit_after = self.bluebird.heap_bounds[1]
-        self.assertEqual(limit_before + brk_inc_size + 1, limit_after)
-
+        self.assertEqual(limit_before + brk_inc_size, limit_after)
+    
     def test_bmmap_anon(self):
         self.bluebird.get_heap()
         sleep(1)
@@ -187,7 +200,8 @@ class BlueBirdTest(unittest.TestCase):
         sleep(1)
         tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
         self.assertEqual(0, tracer_pid)
-    
+        
+
 if __name__ == '__main__':
     compile_test_bin()
     test_pid = os.getpid()
@@ -196,4 +210,5 @@ if __name__ == '__main__':
     test_proc_syscalls = (write, nanosleep)
     unittest.main(verbosity=3, exit=False)
     os.unlink('alt_print')
-    #os.unlink('redirect.txt')
+    if os.path.isfile('redirect.txt'):
+        os.unlink('redirect.txt')
