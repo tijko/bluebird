@@ -7,6 +7,7 @@ import sys
 
 import re
 import os
+from stat import S_IRWXU
 import platform
 from math import inf
 from time import sleep
@@ -35,7 +36,7 @@ stats_tuple = namedtuple('stats', ['pid', 'comm', 'state', 'ppid', 'pgrp',
                                    'start_brk', 'arg_start', 'arg_end',
                                    'env_start', 'env_end', 'exit_code'])
 
-PATH_MAX = 0xfff + 1
+PATH_MAX = 0x1000
 
 syscall_nr_path = '/usr/include/asm/unistd_{}.h'
 
@@ -217,7 +218,13 @@ class Bluebird(object):
         if self.heap_bounds is None:
             raise NoHeapAddress    
         heap = self.heap_bounds[1]
-        bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, path)
+        fd = 0
+        if path is not None:
+            self.expand_heap(0x1000)
+            writestring(self.traced_pid, heap, path)
+            fd = openfd(self.traced_pid, os.O_CREAT | os.O_WRONLY |
+                                         S_IRWXU, heap)
+        bmmap(self.traced_pid, addr, length, prot, flags, offset, heap, fd)
         self.get_heap()
 
     def get_fds(self):
@@ -241,6 +248,7 @@ class Bluebird(object):
         self.length = PATH_MAX - 1
         self.expand_heap(self.length)
         self.get_heap()
+        # XXX where does this put the the getcwd??
         path = bgetcwd(self.traced_pid, self.path_addr,
                        self.length, self.heap_bounds[1])
         words = self.length // WORD
