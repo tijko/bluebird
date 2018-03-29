@@ -160,8 +160,8 @@ static bool is_stopped(pid_t pid)
 
     return pid_state;
 }
-// name mangling??
-long bluebird_cext_ptrace_call(enum __ptrace_request req, pid_t pid, 
+
+long ptrace_call(enum __ptrace_request req, pid_t pid, 
                           unsigned long addr, long data)
 {
     int stopped = 0;
@@ -198,7 +198,7 @@ long bluebird_cext_ptrace_call(enum __ptrace_request req, pid_t pid,
 
 static long bluebird_cext_read(pid_t pid, unsigned const long addr)
 {
-    long peek_data = bluebird_cext_ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
+    long peek_data = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
 
     if (peek_data < 0)
         return -1;
@@ -213,7 +213,7 @@ static PyObject *bluebird_cext_continue_trace(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i:continue_trace", &pid))
         return NULL;
 
-    bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0);
+    ptrace_call(PTRACE_CONT, pid, 0, 0);
     
     Py_RETURN_NONE;
 }
@@ -270,7 +270,7 @@ static PyObject *bluebird_cext_readint(PyObject *self, PyObject *args)
 
 static int set_sys_step(pid_t pid, enum __ptrace_request step)
 {
-    if (bluebird_cext_ptrace_call(step, pid, 0, 0) < 0)
+    if (ptrace_call(step, pid, 0, 0) < 0)
         return -1;
 
     int status;
@@ -304,7 +304,7 @@ static int *get_syscalls(pid_t pid, int nsyscalls, int enter, bool signal_cont)
         calls[syscalls_made++] = rgs.orig_rax;
     }
 
-    if (signal_cont && bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+    if (signal_cont && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
         goto error;
 
     return calls;
@@ -335,7 +335,7 @@ static int *find_call(struct thread_args *find_args)
     while (!current_call || *current_call != find_args->call) {
         current_call = get_syscalls(find_args->pid, 1, enter, false);
         if (!current_call && 
-            bluebird_cext_ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0) {
+            ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0) {
             *find_exit_status = errno;
             return find_exit_status;
         }
@@ -364,7 +364,7 @@ static PyObject *bluebird_cext_find_syscall(PyObject *self, PyObject *args)
 
     if (threaded) {
 
-        if (bluebird_cext_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
+        if (ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
             goto error;
 
         Py_BEGIN_ALLOW_THREADS
@@ -449,7 +449,7 @@ static PyObject *bluebird_cext_iotrace(PyObject *self, PyObject *args)
     struct thread_args io_args = { pid, call, 0, 1 };
     if (threaded) {
 
-        if (bluebird_cext_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) 
+        if (ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) 
             goto error;
 
         Py_BEGIN_ALLOW_THREADS
@@ -503,7 +503,7 @@ static PyObject *bluebird_cext_iotrace(PyObject *self, PyObject *args)
                        PyUnicode_FromString(words));
 
     if (threaded) {
-        bluebird_cext_ptrace_call(PTRACE_DETACH, pid, 0, 0);
+        ptrace_call(PTRACE_DETACH, pid, 0, 0);
     }
 
     return io;
@@ -536,7 +536,7 @@ static PyObject *bluebird_cext_resume(PyObject *self, PyObject *args)
     if (!WIFSTOPPED(status))
         Py_RETURN_NONE;
 
-    if (bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+    if (ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
         return NULL;
 
     Py_RETURN_NONE;
@@ -572,7 +572,7 @@ static long *create_wordsize_array(char *data)
 static int reset_ip(pid_t pid, struct user_regs_struct *rg)
 {
     if (ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
-        bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
+        ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
         return -1;
     }
 
@@ -597,7 +597,7 @@ static PyObject *bluebird_cext_goinit(PyObject *self, PyObject *args)
 static long bluebird_cext_write(pid_t pid, unsigned const long addr, 
                                            unsigned const long data)
 {
-    long write_ret = bluebird_cext_ptrace_call(PTRACE_POKEDATA, pid, addr, data); 
+    long write_ret = ptrace_call(PTRACE_POKEDATA, pid, addr, data); 
 
     if (write_ret < 0)
         return -1;
@@ -690,7 +690,7 @@ static PyObject *bluebird_cext_signal(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ii:signal", &pid, &ptrace_signal)) 
         return NULL;
 
-    if (bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) { 
+    if (ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) { 
         bluebird_cext_handle_error();
         return NULL;
     }
@@ -897,10 +897,10 @@ static PyObject *bluebird_cext_attach(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i:attach", &pid)) 
         return NULL;
 
-    if (bluebird_cext_ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
+    if (ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
         goto fallout;
 
-    if (bluebird_cext_ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)  
+    if (ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)  
         goto fallout;
 
     Py_RETURN_NONE;
@@ -917,7 +917,7 @@ static PyObject *bluebird_cext_detach(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i:detach", &pid)) 
         return NULL;
 
-    if (bluebird_cext_ptrace_call(PTRACE_DETACH, pid, 0, 0) < 0) {
+    if (ptrace_call(PTRACE_DETACH, pid, 0, 0) < 0) {
         bluebird_cext_handle_error();
         return NULL;
     }
