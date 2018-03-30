@@ -2,22 +2,21 @@
 # -*- coding: utf-8 -*-
 
 from bluebird_cext import *
-
-import sys
-
-import re
-import os
-from stat import S_IRWXU
-import platform
-from math import inf
-from time import sleep
-from threading import Thread
-from elftools.elf.elffile import *
 from collections import defaultdict, namedtuple
+from elftools.elf.elffile import *
 
 from mmap import PROT_EXEC, PROT_READ, PROT_WRITE, \
            MAP_PRIVATE, MAP_ANONYMOUS, MAP_SHARED, \
            MAP_DENYWRITE, MAP_EXECUTABLE, PAGESIZE
+
+import os
+import platform
+import re
+from stat import S_IRWXU
+import sys
+
+from threading import Thread
+from time import sleep
 
 
 stats_tuple = namedtuple('stats', ['pid', 'comm', 'state', 'ppid', 'pgrp',
@@ -165,31 +164,11 @@ class Bluebird(object):
         env_var = filter(lambda s: s and '=' in s, env_var.split('\n'))
         return dict(map(lambda s: s.split('=', 1), env_var))
 
-    def io_update(self, call, io, ncall, ncalls):
-        while self.trace_results is None and not self.tracing_error:
-            sleep(1)
-        if self.tracing:
-            raise RunningTraceError
-        for fd in self.trace_results:
-            io[fd].append(self.trace_results[fd])
-        self.start()
-        if ncall < ncalls:
-            self.create_trace_thread(iotrace, self.io_update, [call, 1], 
-                                           [call, io, ncall + 1, ncalls])
-
-    def rw_trace(self, call, ncalls=inf):
-        ncall = 0
-        io = self.rdata if call == syscalls['NR_read'] else self.wdata
-        while ncall < ncalls:
-            io_made = iotrace(self.traced_pid, call, 0)
-            for fd in io_made:
-                io[fd].append(io_made[fd])
-            ncall += 1
-
-    def nb_rw_trace(self, call, ncalls):
-        io = self.rdata if call == syscalls['NR_read'] else self.wdata
-        self.create_trace_thread(iotrace, self.io_update, [call, 1], 
-                                         [call, io, 1, ncalls])
+    def write_trace(self, number_of_calls):
+        for call in range(number_of_calls):
+            for fd, read_data in collect_wr_data(self.traced_pid).items():
+                self.wdata[fd].append(read_data)
+        self.cont_trace()
 
     def get_current_call(self):
         return get_syscall(self.traced_pid)
@@ -202,12 +181,8 @@ class Bluebird(object):
         # syscalls without allowing any calls to slip by
         return get_syscalls(self.traced_pid, nsyscalls)
 
-    def find_call(self, call, non_blocking=False, timeout=0):
-        if non_blocking:
-            self.create_trace_thread(find_syscall, None, 
-                                    [call, timeout, 1], None)
-        else:    
-            find_syscall(self.traced_pid, call, timeout, 0)
+    def find_call(self, call, timeout=0):
+        find_syscall(self.traced_pid, call, timeout)
 
     def expand_heap(self, amount):
         if self.heap_bounds is None:
@@ -251,7 +226,6 @@ class Bluebird(object):
         self.length = PATH_MAX - 1
         self.expand_heap(self.length)
         self.get_heap()
-        # XXX where does this put the the getcwd??
         path = bgetcwd(self.traced_pid, self.path_addr,
                        self.length, self.heap_bounds[1])
         words = self.length // WORD
