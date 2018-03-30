@@ -115,7 +115,7 @@ class BlueBirdTest(unittest.TestCase):
      
     def test_find_syscall(self):
         getsid = syscalls['NR_getsid']
-        test_find = self.bluebird.find_call(getsid, non_blocking=True)
+        test_find = self.bluebird.find_call(getsid)
         while self.bluebird.tracing:
             sleep(1)
         self.assertIsNone(test_find)
@@ -136,7 +136,7 @@ class BlueBirdTest(unittest.TestCase):
         limit_before = self.bluebird.heap_bounds[1]
         brk_inc_size = 0x1000
         self.bluebird.cont_trace()
-        sleep(5)
+        sleep(1)
         self.bluebird.expand_heap(brk_inc_size)
         limit_after = self.bluebird.heap_bounds[1]
         self.assertEqual(limit_before + brk_inc_size, limit_after)
@@ -163,7 +163,7 @@ class BlueBirdTest(unittest.TestCase):
         fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 
                    self.test_proc_filename), '2':pts}
         self.assertEqual(fd_dict, self.bluebird.get_fds())
-    
+     
     def test_redirect_fd(self):
         self.bluebird.get_heap()
         redirect_file = '{}/redirect.txt'.format(os.getcwd())
@@ -171,7 +171,7 @@ class BlueBirdTest(unittest.TestCase):
         self.bluebird.redirect_fd(1, redirect_file)
         sleep(1)
         self.assertNotEqual(os.stat(redirect_file).st_size, 0)
-
+    
     def test_get_trace_dir(self):
         cdir = os.getcwd()
         self.bluebird.get_heap()
@@ -186,12 +186,12 @@ class BlueBirdTest(unittest.TestCase):
         bluebird_env = self.bluebird.getenv()
         self.assertEqual(env_dict, bluebird_env)
 
-    def test_iotrace_write(self):
+    def test_write_trace(self):
         process_str = 'Process <{}> is running!\n'.format(self.test_proc_pid)
-        self.bluebird.rw_trace(write, ncalls=4)
+        self.bluebird.write_trace(4)
         for fd in self.bluebird.wdata:
-            for wstr in self.bluebird.wdata[fd]:
-                self.assertEqual(process_str, wstr)
+            self.assertEqual(process_str, self.bluebird.wdata[fd][0])
+        self.assertEqual(len(list(self.bluebird.wdata.values())[0]), 4)
 
     def test_detach(self):
         tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')

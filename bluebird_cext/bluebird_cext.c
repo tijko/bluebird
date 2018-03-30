@@ -1,18 +1,19 @@
+// Python header file must be included first
 #include <Python.h>
 
+#include <asm/unistd_64.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <signal.h>
-#include <unistd.h>
-#include <sys/reg.h>
 #include <stdbool.h>
-#include <sys/wait.h>
-#include <sys/user.h>
-#include <sys/select.h>
 #include <sys/ptrace.h>
+#include <sys/reg.h>
+#include <sys/select.h>
 #include <sys/syscall.h>
+#include <sys/user.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
-#include <pthread.h>
 
 /* The read would segfault the bird.  Check the input extra inspection. */
         
@@ -315,14 +316,7 @@ error:
     return NULL;
 }
 
-struct thread_args {
-    pid_t pid;
-    int call;
-    int timeout;
-    int io_trace;
-};
-
-static int *find_call(struct thread_args *find_args)
+static int *find_call(pid_t pid, int call, int timeout)
 {
     int *current_call = NULL;
     int *find_exit_status = malloc(sizeof(int));
@@ -331,18 +325,19 @@ static int *find_call(struct thread_args *find_args)
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     clock_t start = ts.tv_sec;
-    int enter = find_args->io_trace == 0 || find_args->call == SYS_write ? 1 : 0;
-    while (!current_call || *current_call != find_args->call) {
-        current_call = get_syscalls(find_args->pid, 1, enter, false);
-        if (!current_call && 
-            ptrace_call(PTRACE_CONT, find_args->pid, 0, 0) < 0) {
+
+    while (!current_call || *current_call != call) {
+
+        current_call = get_syscalls(pid, 1, 1, false);
+
+        if (!current_call && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
             *find_exit_status = errno;
             return find_exit_status;
         }
 
-        if (find_args->timeout > 0) {
+        if (timeout > 0) {
             clock_gettime(CLOCK_REALTIME, &ts);
-            if ((ts.tv_sec - start) > find_args->timeout)
+            if ((ts.tv_sec - start) > timeout)
                 break;
         }
     }
@@ -353,42 +348,14 @@ static int *find_call(struct thread_args *find_args)
 static PyObject *bluebird_cext_find_syscall(PyObject *self, PyObject *args)
 {
     pid_t pid;
-    int call, timeout, threaded;
+    int call, timeout;
 
-    if (!PyArg_ParseTuple(args, "iiii:find_syscall", 
-                          &pid, &call, &timeout, &threaded))
+    if (!PyArg_ParseTuple(args, "iii:find_syscall", &pid, &call, &timeout))
         return NULL;
 
-    void *find_exit_status = NULL;
-    struct thread_args find_args = { pid, call, timeout, 0 };
-
-    if (threaded) {
-
-        if (ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0)
-            goto error;
-
-        Py_BEGIN_ALLOW_THREADS
-        pthread_t find_call_thread;
-        pthread_create(&find_call_thread, NULL, (void *) find_call, 
-                                                (void *) &find_args); 
-
-        pthread_join(find_call_thread, &find_exit_status);
-        Py_END_ALLOW_THREADS
-    } else 
-        find_exit_status = find_call(&find_args);
+    find_call(pid, call, timeout);
         
-    if (*(int *) find_exit_status < 0) 
-        goto error;
-  
-    free(find_exit_status);
     Py_RETURN_NONE;
-
-error:
-    if (find_exit_status)
-        free(find_exit_status);
-        
-    bluebird_cext_handle_error();
-    return NULL;
 }
 
 static PyObject *bluebird_cext_get_syscall(PyObject *self, PyObject *args)
@@ -437,35 +404,14 @@ static PyObject *bluebird_cext_get_syscalls(PyObject *self, PyObject *args)
     return call_list;
 }
 
-static PyObject *bluebird_cext_iotrace(PyObject *self, PyObject *args)
+static PyObject *bluebird_cext_collect_wr_data(PyObject *self, PyObject *args)
 {
     pid_t pid;
-    int call, threaded;
 
-    if (!PyArg_ParseTuple(args, "iii:iotrace", &pid, &call, &threaded))
+    if (!PyArg_ParseTuple(args, "i:collect_wr_data", &pid))
         return NULL;
 
-    void *find_exit_status = NULL;
-    struct thread_args io_args = { pid, call, 0, 1 };
-    if (threaded) {
-
-        if (ptrace_call(PTRACE_ATTACH, pid, 0, 0) < 0) 
-            goto error;
-
-        Py_BEGIN_ALLOW_THREADS
-        pthread_t find_io_call_thread;
-        pthread_create(&find_io_call_thread, NULL, (void *) find_call, 
-                                                   (void *) &io_args);
-
-        pthread_join(find_io_call_thread, &find_exit_status);
-        Py_END_ALLOW_THREADS
-    } else
-        find_exit_status = find_call(&io_args);
-
-    if (*(int *) find_exit_status < 0)
-        goto error;
-
-    free(find_exit_status);
+    find_call(pid, __NR_write, 0);
 
     /*
      * Write -> rdi:fd, rsi:buf, rdx:bytes
@@ -475,7 +421,7 @@ static PyObject *bluebird_cext_iotrace(PyObject *self, PyObject *args)
     struct user_regs_struct rgs;
 
     if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
-        goto error;
+        return NULL;
 
     int fd_key = rgs.rdi;
     long addr = rgs.rsi;
@@ -489,7 +435,7 @@ static PyObject *bluebird_cext_iotrace(PyObject *self, PyObject *args)
         long read_string = bluebird_cext_read(pid, addr); 
         
         if (read_string < 0)
-            goto error;
+            return NULL;
 
         memcpy(words + (i * WORD), (char *) &read_string, WORD);
 
@@ -502,22 +448,7 @@ static PyObject *bluebird_cext_iotrace(PyObject *self, PyObject *args)
     PyDict_SetItem(io, PyLong_FromLong(fd_key),
                        PyUnicode_FromString(words));
 
-    if (threaded) {
-        ptrace_call(PTRACE_DETACH, pid, 0, 0);
-    }
-
     return io;
-
-error:
-
-    if (find_exit_status) {
-        errno = *(int *) find_exit_status;
-        free(find_exit_status);
-    }
-
-    bluebird_cext_handle_error();
-
-    return NULL;
 }
 
 static PyObject *bluebird_cext_resume(PyObject *self, PyObject *args)
@@ -954,8 +885,6 @@ static PyMethodDef bluebird_cextmethods[] = {
      "creates a memory map for the traced process"},
     {"bgetcwd", bluebird_cext_bgetcwd, METH_VARARGS,
      "finds the current directory for the traced process"},
-    {"iotrace", bluebird_cext_iotrace, METH_VARARGS,
-     "captures read/write calls returning register values"},
     {"redirect_fd", bluebird_cext_redirect_fd, METH_VARARGS,
      "redirects the pass a file-descriptor with another passed"},
     {"goinit", bluebird_cext_goinit, METH_VARARGS,
@@ -964,6 +893,8 @@ static PyMethodDef bluebird_cextmethods[] = {
      "open and returns file descriptor"},
     {"continue_trace", bluebird_cext_continue_trace, METH_VARARGS,
      "sends a continue signal to a stopped traced process"},
+    {"collect_wr_data", bluebird_cext_collect_wr_data, METH_VARARGS,
+     "returns data that a write syscall uses"}, 
     {NULL, NULL, 0, NULL}
 };
 
