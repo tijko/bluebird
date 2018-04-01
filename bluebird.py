@@ -177,13 +177,6 @@ class Bluebird(object):
                 self.rdata[fd].append(read_data)
         self.cont_trace()
 
-    def read_trace(self, number_of_calls):
-        '''
-        Similar to write_trace but the register address for the read is in
-        the return...
-        '''
-        pass
-
     def get_current_call(self):
         return get_syscall(self.traced_pid)
 
