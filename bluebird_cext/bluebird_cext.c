@@ -316,7 +316,7 @@ error:
     return NULL;
 }
 
-static int *find_call(pid_t pid, int call, int timeout)
+static int *find_call(pid_t pid, int call, int enter, int timeout)
 {
     int *current_call = NULL;
     int *find_exit_status = malloc(sizeof(int));
@@ -328,7 +328,7 @@ static int *find_call(pid_t pid, int call, int timeout)
 
     while (!current_call || *current_call != call) {
 
-        current_call = get_syscalls(pid, 1, 1, false);
+        current_call = get_syscalls(pid, 1, enter, false);
 
         if (!current_call && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
             *find_exit_status = errno;
@@ -353,7 +353,7 @@ static PyObject *bluebird_cext_find_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "iii:find_syscall", &pid, &call, &timeout))
         return NULL;
 
-    find_call(pid, call, timeout);
+    find_call(pid, call, 1, timeout);
         
     Py_RETURN_NONE;
 }
@@ -404,14 +404,17 @@ static PyObject *bluebird_cext_get_syscalls(PyObject *self, PyObject *args)
     return call_list;
 }
 
-static PyObject *bluebird_cext_collect_wr_data(PyObject *self, PyObject *args)
+static PyObject *bluebird_cext_collect_io_data(PyObject *self, PyObject *args)
 {
     pid_t pid;
+    int call;
 
-    if (!PyArg_ParseTuple(args, "i:collect_wr_data", &pid))
+    if (!PyArg_ParseTuple(args, "ii:collect_wr_data", &pid, &call))
         return NULL;
 
-    find_call(pid, __NR_write, 0);
+    int enter = call == __NR_write ? 1 : 0;
+
+    find_call(pid, call, enter, 0);
 
     /*
      * Write -> rdi:fd, rsi:buf, rdx:bytes
@@ -893,8 +896,8 @@ static PyMethodDef bluebird_cextmethods[] = {
      "open and returns file descriptor"},
     {"continue_trace", bluebird_cext_continue_trace, METH_VARARGS,
      "sends a continue signal to a stopped traced process"},
-    {"collect_wr_data", bluebird_cext_collect_wr_data, METH_VARARGS,
-     "returns data that a write syscall uses"}, 
+    {"collect_io_data", bluebird_cext_collect_io_data, METH_VARARGS,
+     "returns the data that is being written or read"}, 
     {NULL, NULL, 0, NULL}
 };
 

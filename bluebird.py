@@ -90,7 +90,6 @@ class Bluebird(object):
         self.trace_rdata = {}
         self.attached = False
         self.tracing = False
-        self.tracing_error = False
         self.elf_handle = None
         self.get_heap()
         self.stat_pattern = re.compile('(\d+\s)(\(.+\)\s)(\w+\s)((-?\d+\s?){49})')
@@ -165,10 +164,25 @@ class Bluebird(object):
         return dict(map(lambda s: s.split('=', 1), env_var))
 
     def write_trace(self, number_of_calls):
+        wr_call = syscalls['NR_write']
         for call in range(number_of_calls):
-            for fd, read_data in collect_wr_data(self.traced_pid).items():
+            for fd, read_data in collect_io_data(self.traced_pid, wr_call).items():
                 self.wdata[fd].append(read_data)
         self.cont_trace()
+
+    def read_trace(self, number_of_calls):
+        rd_call = syscalls['NR_read']
+        for call in range(number_of_calls):
+            for fd, read_data in collect_io_data(self.traced_pid, rd_call).items():
+                self.rdata[fd].append(read_data)
+        self.cont_trace()
+
+    def read_trace(self, number_of_calls):
+        '''
+        Similar to write_trace but the register address for the read is in
+        the return...
+        '''
+        pass
 
     def get_current_call(self):
         return get_syscall(self.traced_pid)
