@@ -235,7 +235,7 @@ static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
         long read_string = ptrace_peekdata(pid, addr); 
         
         if (read_string < 0)
-            return NULL;
+            goto error;
 
         memcpy(words + (i * WORD), (char *) &read_string, WORD);
 
@@ -251,6 +251,11 @@ static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
     words[WORD * words_to_read] = '\0';
 
     return Py_BuildValue("s", words);
+
+error:
+    free(words);
+    handle_error();
+    return NULL;
 }
 
 static PyObject *bluebird_cext_readint(PyObject *self, PyObject *args)
@@ -263,8 +268,10 @@ static PyObject *bluebird_cext_readint(PyObject *self, PyObject *args)
 
     long read_int = ptrace_peekdata(pid, addr);
 
-    if (read_int < 0)
+    if (read_int < 0) {
+        handle_error();
         return NULL;
+    }
 
     return Py_BuildValue("i", read_int);
 }
@@ -274,23 +281,17 @@ static int set_sys_step(pid_t pid, enum __ptrace_request step)
     if (ptrace_call(step, pid, 0, 0) < 0)
         return -1;
 
-    int status;
-
-    waitpid(pid, &status, __WALL);
+    waitpid(pid, NULL, __WALL);
 
     return 0;
 }
 
-static int *get_syscalls(pid_t pid, int nsyscalls, int enter, bool signal_cont)
+static int get_syscall(pid_t pid, int enter, bool signal_cont)
 {
     struct user_regs_struct rgs;
-    int *calls = malloc(sizeof(int) * nsyscalls);
-    int syscalls_made = 0;
 
-    if (!calls)
-        return NULL;
 
-    while (syscalls_made < nsyscalls) {
+    while ( 1 ) {
         if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
             goto error;
 
@@ -301,42 +302,32 @@ static int *get_syscalls(pid_t pid, int nsyscalls, int enter, bool signal_cont)
         //  orig_rax mask against 0x80 SIGTRAP for info on entry/exit?
         if ((rgs.orig_rax == 219 && enter) || (signed) rgs.rax == -ENOSYS)
             continue;
-
-        calls[syscalls_made++] = rgs.orig_rax;
+        else
+            break;
     }
+
+    int call = rgs.orig_rax;
 
     if (signal_cont && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
         goto error;
 
-    return calls;
+    return call;
 
 error:
-    free(calls);
-
-    return NULL;
+    handle_error();
+    return -1;
 }
 
-static int *find_call(pid_t pid, int call, int enter, int timeout)
+static int find_call(pid_t pid, int call, int enter, int timeout)
 {
-    // Have the invocating function handle the array/memblk
-    // `find_call` returns function number or errno
-    int *current_call = NULL;
-    int *find_exit_status = malloc(sizeof(int));
-    *find_exit_status = 0;
-
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     clock_t start = ts.tv_sec;
 
-    while (!current_call || *current_call != call) {
-        // no need to step instructions on PTRACE_SYSCALL
-        // ...?
-        current_call = get_syscalls(pid, 1, enter, false);
+    while (get_syscall(pid, enter, false) != call) {
 
-        if (!current_call && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
-            *find_exit_status = errno;
-            return find_exit_status;
-        }
+        if (ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) 
+            goto error;
 
         if (timeout > 0) {
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -345,7 +336,11 @@ static int *find_call(pid_t pid, int call, int enter, int timeout)
         }
     }
 
-    return find_exit_status;
+    return 0;
+
+error:
+    handle_error();
+    return -1;
 }
 
 static PyObject *bluebird_cext_find_syscall(PyObject *self, PyObject *args)
@@ -368,19 +363,13 @@ static PyObject *bluebird_cext_get_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i:get_syscall", &pid))
         return NULL;
 
-    int *call = get_syscalls(pid, 1, 1, true);
+    int call = get_syscall(pid, 1, true);
 
-    if (!call)
-        return NULL;
-
-    PyObject *pycall = PyLong_FromLong(*call);
-
-    free(call);
+    PyObject *pycall = PyLong_FromLong(call);
 
     return pycall;
 }
-// XXX alloc the mem in each individual call passing along OR
-//     alloc in the call returning then freeing 
+
 static PyObject *bluebird_cext_get_syscalls(PyObject *self, PyObject *args)
 {
     pid_t pid;
@@ -389,20 +378,14 @@ static PyObject *bluebird_cext_get_syscalls(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ii:get_syscalls", &pid, &nsyscalls))
         return NULL;
 
-    int *syscalls = get_syscalls(pid, nsyscalls, 1, true);
-
-    if (!syscalls)
-        return NULL;
-
     PyObject *call_list = PyList_New(nsyscalls);
 
-    for (int i=0; i < nsyscalls; i++) {
 
-        PyObject *pycall = PyLong_FromLong(syscalls[i]);
+    for (int i=0; i < nsyscalls; i++) {
+        int call = get_syscall(pid, 1, true);
+        PyObject *pycall = PyLong_FromLong(call);
         PyList_SetItem(call_list, i, pycall);
     }
-
-    free(syscalls);
 
     return call_list;
 }
