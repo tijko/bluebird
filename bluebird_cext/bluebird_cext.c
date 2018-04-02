@@ -23,7 +23,7 @@
 
 #define WORD_ALIGNED(data_length) data_length + (WORD - (data_length % WORD))
 
-static void bluebird_cext_handle_error(void)
+static void handle_error(void)
 {
     PyObject *error = NULL, *exception = NULL;
     char *message_str = NULL;
@@ -93,14 +93,14 @@ static void bluebird_cext_handle_error(void)
         PyErr_SetFromErrno(exception);
 }
 
-static void bluebird_cext_sleep(void)
+static void ptrace_sleep(void)
 {
     struct timeval tm = { .tv_usec=WAIT_SLEEP, .tv_sec = 0 };
 
     select(0, NULL, NULL, NULL, &tm);
 }
 
-static int bluebird_cext_ptrace_wait(pid_t pid)
+static int ptrace_wait(pid_t pid)
 {
     int status;
 
@@ -112,7 +112,7 @@ static int bluebird_cext_ptrace_wait(pid_t pid)
         if (WIFSTOPPED(status)) 
             return 0;
 
-        bluebird_cext_sleep();
+        ptrace_sleep();
     }
 
     errno = ESRCH;
@@ -120,14 +120,14 @@ static int bluebird_cext_ptrace_wait(pid_t pid)
     return -1;
 }
 
-static int bluebird_cext_ptrace_stop(pid_t pid)
+static int ptrace_stop(pid_t pid)
 {
     if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) 
         return -1;
 
-    bluebird_cext_sleep();
+    ptrace_sleep();
 
-    if (bluebird_cext_ptrace_wait(pid) < 0) {
+    if (ptrace_wait(pid) < 0) {
         errno = ESRCH;
         return -1;
     }
@@ -168,7 +168,7 @@ long ptrace_call(enum __ptrace_request req, pid_t pid,
     int stopped = 0;
 
     if (req != PTRACE_ATTACH && !is_stopped(pid)) 
-        stopped = bluebird_cext_ptrace_stop(pid);
+        stopped = ptrace_stop(pid);
 
     if (stopped < 0) 
         return -1;
@@ -318,6 +318,8 @@ error:
 
 static int *find_call(pid_t pid, int call, int enter, int timeout)
 {
+    // Have the invocating function handle the array/memblk
+    // `find_call` returns function number or errno
     int *current_call = NULL;
     int *find_exit_status = malloc(sizeof(int));
     *find_exit_status = 0;
@@ -327,7 +329,8 @@ static int *find_call(pid_t pid, int call, int enter, int timeout)
     clock_t start = ts.tv_sec;
 
     while (!current_call || *current_call != call) {
-
+        // no need to step instructions on PTRACE_SYSCALL
+        // ...?
         current_call = get_syscalls(pid, 1, enter, false);
 
         if (!current_call && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
@@ -463,7 +466,7 @@ static PyObject *bluebird_cext_resume(PyObject *self, PyObject *args)
 
     int status;
     if (waitpid(pid, &status, __WALL | WNOHANG) < 0) {
-        bluebird_cext_handle_error();
+        handle_error();
         return NULL;
     }
     
@@ -551,7 +554,7 @@ static PyObject *bluebird_cext_writeint(PyObject *self, PyObject *args)
     long writeint = bluebird_cext_write(pid, addr, wr_data);
 
     if (writeint < 0) {
-        bluebird_cext_handle_error();
+        handle_error();
         return NULL;
     }
 
@@ -580,7 +583,7 @@ static PyObject *bluebird_cext_writestring(PyObject *self, PyObject *args)
     
     for (int i=0; words[i] != 0; i++) {
         if (bluebird_cext_write(pid, addr, words[i]) < 0) {
-            bluebird_cext_handle_error();
+            handle_error();
             return NULL;
         }
 
@@ -625,7 +628,7 @@ static PyObject *bluebird_cext_signal(PyObject *self, PyObject *args)
         return NULL;
 
     if (ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) { 
-        bluebird_cext_handle_error();
+        handle_error();
         return NULL;
     }
 
@@ -721,7 +724,7 @@ error:
     if (orig_regs != NULL)
         free(orig_regs);
 
-    bluebird_cext_handle_error();
+    handle_error();
 
     return -1;
 }
@@ -840,7 +843,7 @@ static PyObject *bluebird_cext_attach(PyObject *self, PyObject *args)
     Py_RETURN_NONE;
 
 fallout:
-    bluebird_cext_handle_error();
+    handle_error();
     return NULL;
 }
 
@@ -852,7 +855,7 @@ static PyObject *bluebird_cext_detach(PyObject *self, PyObject *args)
         return NULL;
 
     if (ptrace_call(PTRACE_DETACH, pid, 0, 0) < 0) {
-        bluebird_cext_handle_error();
+        handle_error();
         return NULL;
     }
 
