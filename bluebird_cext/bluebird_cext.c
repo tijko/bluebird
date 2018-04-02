@@ -197,7 +197,7 @@ long ptrace_call(enum __ptrace_request req, pid_t pid,
     return ptrace_ret;
 }
 
-static long bluebird_cext_read(pid_t pid, unsigned const long addr)
+static long ptrace_peekdata(pid_t pid, unsigned const long addr)
 {
     long peek_data = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
 
@@ -232,7 +232,7 @@ static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
 
     for (int i=0; i < words_to_read; i++) {
 
-        long read_string = bluebird_cext_read(pid, addr); 
+        long read_string = ptrace_peekdata(pid, addr); 
         
         if (read_string < 0)
             return NULL;
@@ -261,7 +261,7 @@ static PyObject *bluebird_cext_readint(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ik:readint", &pid, &addr))
         return NULL;
 
-    long read_int = bluebird_cext_read(pid, addr);
+    long read_int = ptrace_peekdata(pid, addr);
 
     if (read_int < 0)
         return NULL;
@@ -438,7 +438,7 @@ static PyObject *bluebird_cext_collect_io_data(PyObject *self, PyObject *args)
 
     for (int i=0; i < words_to_read; i++) {
 
-        long read_string = bluebird_cext_read(pid, addr); 
+        long read_string = ptrace_peekdata(pid, addr); 
         
         if (read_string < 0)
             return NULL;
