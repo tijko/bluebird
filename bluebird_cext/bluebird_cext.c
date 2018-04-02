@@ -100,6 +100,21 @@ static void ptrace_sleep(void)
     select(0, NULL, NULL, NULL, &tm);
 }
 
+static int ptrace_stop(pid_t pid)
+{
+    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) 
+        return -1;
+
+    ptrace_sleep();
+
+    if (ptrace_wait(pid) < 0) {
+        errno = ESRCH;
+        return -1;
+    }
+
+    return 0;
+}
+
 static int ptrace_wait(pid_t pid)
 {
     int status;
@@ -118,21 +133,6 @@ static int ptrace_wait(pid_t pid)
     errno = ESRCH;
 
     return -1;
-}
-
-static int ptrace_stop(pid_t pid)
-{
-    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) 
-        return -1;
-
-    ptrace_sleep();
-
-    if (ptrace_wait(pid) < 0) {
-        errno = ESRCH;
-        return -1;
-    }
-
-    return 0;
 }
 
 static bool is_stopped(pid_t pid)
@@ -197,83 +197,14 @@ long ptrace_call(enum __ptrace_request req, pid_t pid,
     return ptrace_ret;
 }
 
-static long ptrace_peekdata(pid_t pid, unsigned const long addr)
+static int reset_ip(pid_t pid, struct user_regs_struct *rg)
 {
-    long peek_data = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
-
-    if (peek_data < 0)
+    if (ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
+        ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
         return -1;
-
-    return peek_data;
-}
-
-static PyObject *bluebird_cext_continue_trace(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-
-    if (!PyArg_ParseTuple(args, "i:continue_trace", &pid))
-        return NULL;
-
-    ptrace_call(PTRACE_CONT, pid, 0, 0);
-    
-    Py_RETURN_NONE;
-}
-
-static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-    unsigned long addr;
-    int words_to_read;
-
-    if (!PyArg_ParseTuple(args, "iki:readstring", &pid, &addr, &words_to_read)) 
-        return NULL;
-
-    char *words = malloc(sizeof(char) * (WORD * words_to_read) + 1);
-
-    for (int i=0; i < words_to_read; i++) {
-
-        long read_string = ptrace_peekdata(pid, addr); 
-        
-        if (read_string < 0)
-            goto error;
-
-        memcpy(words + (i * WORD), (char *) &read_string, WORD);
-
-        addr += WORD;
-    }
- 
-    ptrace(PTRACE_CONT, pid, 0, 0);
-
-    for (int i=0; i < WORD * words_to_read; i++)
-        if (words[i] == '\0')
-            words[i] = '\n';
-
-    words[WORD * words_to_read] = '\0';
-
-    return Py_BuildValue("s", words);
-
-error:
-    free(words);
-    handle_error();
-    return NULL;
-}
-
-static PyObject *bluebird_cext_readint(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-    unsigned const long addr;
-
-    if (!PyArg_ParseTuple(args, "ik:readint", &pid, &addr))
-        return NULL;
-
-    long read_int = ptrace_peekdata(pid, addr);
-
-    if (read_int < 0) {
-        handle_error();
-        return NULL;
     }
 
-    return Py_BuildValue("i", read_int);
+    return 0;
 }
 
 static int set_sys_step(pid_t pid, enum __ptrace_request step)
@@ -343,125 +274,6 @@ error:
     return -1;
 }
 
-static PyObject *bluebird_cext_find_syscall(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-    int call, timeout;
-
-    if (!PyArg_ParseTuple(args, "iii:find_syscall", &pid, &call, &timeout))
-        return NULL;
-
-    find_call(pid, call, 1, timeout);
-        
-    Py_RETURN_NONE;
-}
-
-static PyObject *bluebird_cext_get_syscall(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-
-    if (!PyArg_ParseTuple(args, "i:get_syscall", &pid))
-        return NULL;
-
-    int call = get_syscall(pid, 1, true);
-
-    PyObject *pycall = PyLong_FromLong(call);
-
-    return pycall;
-}
-
-static PyObject *bluebird_cext_get_syscalls(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-    int nsyscalls;
-
-    if (!PyArg_ParseTuple(args, "ii:get_syscalls", &pid, &nsyscalls))
-        return NULL;
-
-    PyObject *call_list = PyList_New(nsyscalls);
-
-
-    for (int i=0; i < nsyscalls; i++) {
-        int call = get_syscall(pid, 1, true);
-        PyObject *pycall = PyLong_FromLong(call);
-        PyList_SetItem(call_list, i, pycall);
-    }
-
-    return call_list;
-}
-
-static PyObject *bluebird_cext_collect_io_data(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-    int call;
-
-    if (!PyArg_ParseTuple(args, "ii:collect_wr_data", &pid, &call))
-        return NULL;
-
-    int enter = call == __NR_write ? 1 : 0;
-
-    find_call(pid, call, enter, 0);
-
-    /*
-     * Write -> rdi:fd, rsi:buf, rdx:bytes
-     * Read  -> rdi:fd, rsi:buf, rdx:bytes
-     */
-
-    struct user_regs_struct rgs;
-
-    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
-        return NULL;
-
-    int fd_key = rgs.rdi;
-    long addr = rgs.rsi;
-
-    int word_block = (rgs.rdx & ~(WORD - 1)) + WORD;
-    int words_to_read = word_block / WORD;
-    char *words = malloc(word_block);
-
-    for (int i=0; i < words_to_read; i++) {
-
-        long read_string = ptrace_peekdata(pid, addr); 
-        
-        if (read_string < 0)
-            return NULL;
-
-        memcpy(words + (i * WORD), (char *) &read_string, WORD);
-
-        addr += WORD;
-    }
- 
-    words[rgs.rdx] = '\0';
-
-    PyObject *io = PyDict_New();
-    PyDict_SetItem(io, PyLong_FromLong(fd_key),
-                       PyUnicode_FromString(words));
-
-    return io;
-}
-
-static PyObject *bluebird_cext_resume(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-
-    if (!PyArg_ParseTuple(args, "i:resume", &pid))
-        return NULL;
-
-    int status;
-    if (waitpid(pid, &status, __WALL | WNOHANG) < 0) {
-        handle_error();
-        return NULL;
-    }
-    
-    if (!WIFSTOPPED(status))
-        Py_RETURN_NONE;
-
-    if (ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
-        return NULL;
-
-    Py_RETURN_NONE;
-}
-
 static long *create_wordsize_array(char *data)
 {
     size_t data_length = strlen(data);
@@ -489,32 +301,29 @@ static long *create_wordsize_array(char *data)
     return words;
 }
 
-static int reset_ip(pid_t pid, struct user_regs_struct *rg)
+static long ptrace_peekdata(pid_t pid, unsigned const long addr)
 {
-    if (ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
-        ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
-        return -1;
-    }
+    long peek_data = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
 
-    return 0;
+    if (peek_data < 0)
+        return -1;
+
+    return peek_data;
 }
 
-static PyObject *bluebird_cext_goinit(PyObject *self, PyObject *args)
+static PyObject *bluebird_cext_continue_trace(PyObject *self, PyObject *args)
 {
     pid_t pid;
-    unsigned const long addr;
 
-    if (!PyArg_ParseTuple(args, "ik:goinit", &pid, &addr))
+    if (!PyArg_ParseTuple(args, "i:continue_trace", &pid))
         return NULL;
 
-    struct user_regs_struct rg = { .rip=addr };
-
-    reset_ip(pid, &rg);
-
+    ptrace_call(PTRACE_CONT, pid, 0, 0);
+    
     Py_RETURN_NONE;
 }
 
-static long bluebird_cext_write(pid_t pid, unsigned const long addr, 
+static long ptrace_pokedata(pid_t pid, unsigned const long addr, 
                                            unsigned const long data)
 {
     long write_ret = ptrace_call(PTRACE_POKEDATA, pid, addr, data); 
@@ -523,61 +332,6 @@ static long bluebird_cext_write(pid_t pid, unsigned const long addr,
         return -1;
 
     return write_ret;
-}
-
-static PyObject *bluebird_cext_writeint(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-    unsigned const long addr;
-    const long wr_data;
-
-    if (!PyArg_ParseTuple(args, "ikl:writeint", &pid, &addr, &wr_data))
-        return NULL;
-
-    long writeint = bluebird_cext_write(pid, addr, wr_data);
-
-    if (writeint < 0) {
-        handle_error();
-        return NULL;
-    }
-
-    Py_RETURN_NONE;
-}
-
-static PyObject *bluebird_cext_writestring(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-    unsigned long addr;
-    char *wr_data;
-
-    if (!PyArg_ParseTuple(args, "iks:writestring", &pid, &addr, &wr_data))
-        return NULL;
-
-    long *words = create_wordsize_array(wr_data);
-
-    /*
-    XXX debug
-    for (int i=0; words[i]; i++) {
-        PyObject *str = PyUnicode_FromString(words[i]);
-        PyObject_Print(str, stdout, Py_PRINT_RAW);
-
-    }
-    */
-    
-    for (int i=0; words[i] != 0; i++) {
-        if (bluebird_cext_write(pid, addr, words[i]) < 0) {
-            handle_error();
-            return NULL;
-        }
-
-        addr += WORD;
-    }
-
-    free(words);
-
-    ptrace(PTRACE_CONT, pid, 0, 0);
-
-    Py_RETURN_NONE;
 }
 
 static bool is_yama_enabled(void)
@@ -600,22 +354,6 @@ static bool is_traceable(void)
     if (uid == 0) return true;
     
     return is_yama_enabled();
-}
-
-static PyObject *bluebird_cext_signal(PyObject *self, PyObject *args)
-{
-    int ptrace_signal; 
-    pid_t pid;
-
-    if (!PyArg_ParseTuple(args, "ii:signal", &pid, &ptrace_signal)) 
-        return NULL;
-
-    if (ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) { 
-        handle_error();
-        return NULL;
-    }
-
-    Py_RETURN_NONE;
 }
 
 static int find_syscall_exit(pid_t pid)
@@ -712,6 +450,277 @@ error:
     return -1;
 }
 
+static int open_file(pid_t pid, long heap_addr, int mode)
+{
+    long args[] = { SYS_open, heap_addr, mode }; 
+    int offsets[] = { ORIG_RAX, RDI, RSI, RDX };
+    int fd = insert_call(pid, args, offsets, 4, heap_addr);
+
+    return fd;
+}
+
+static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    unsigned long addr;
+    int words_to_read;
+
+    if (!PyArg_ParseTuple(args, "iki:readstring", &pid, &addr, &words_to_read)) 
+        return NULL;
+
+    char *words = malloc(sizeof(char) * (WORD * words_to_read) + 1);
+
+    for (int i=0; i < words_to_read; i++) {
+
+        long read_string = ptrace_peekdata(pid, addr); 
+        
+        if (read_string < 0)
+            goto error;
+
+        memcpy(words + (i * WORD), (char *) &read_string, WORD);
+
+        addr += WORD;
+    }
+ 
+    ptrace(PTRACE_CONT, pid, 0, 0);
+
+    for (int i=0; i < WORD * words_to_read; i++)
+        if (words[i] == '\0')
+            words[i] = '\n';
+
+    words[WORD * words_to_read] = '\0';
+
+    return Py_BuildValue("s", words);
+
+error:
+    free(words);
+    handle_error();
+    return NULL;
+}
+
+static PyObject *bluebird_cext_find_syscall(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    int call, timeout;
+
+    if (!PyArg_ParseTuple(args, "iii:find_syscall", &pid, &call, &timeout))
+        return NULL;
+
+    find_call(pid, call, 1, timeout);
+        
+    Py_RETURN_NONE;
+}
+
+static PyObject *bluebird_cext_readint(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    unsigned const long addr;
+
+    if (!PyArg_ParseTuple(args, "ik:readint", &pid, &addr))
+        return NULL;
+
+    long read_int = ptrace_peekdata(pid, addr);
+
+    if (read_int < 0) {
+        handle_error();
+        return NULL;
+    }
+
+    return Py_BuildValue("i", read_int);
+}
+
+static PyObject *bluebird_cext_get_syscall(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+
+    if (!PyArg_ParseTuple(args, "i:get_syscall", &pid))
+        return NULL;
+
+    int call = get_syscall(pid, 1, true);
+
+    PyObject *pycall = PyLong_FromLong(call);
+
+    return pycall;
+}
+
+static PyObject *bluebird_cext_collect_io_data(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    int call;
+
+    if (!PyArg_ParseTuple(args, "ii:collect_wr_data", &pid, &call))
+        return NULL;
+
+    int enter = call == __NR_write ? 1 : 0;
+
+    find_call(pid, call, enter, 0);
+
+    /*
+     * Write -> rdi:fd, rsi:buf, rdx:bytes
+     * Read  -> rdi:fd, rsi:buf, rdx:bytes
+     */
+
+    struct user_regs_struct rgs;
+
+    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
+        return NULL;
+
+    int fd_key = rgs.rdi;
+    long addr = rgs.rsi;
+
+    int word_block = (rgs.rdx & ~(WORD - 1)) + WORD;
+    int words_to_read = word_block / WORD;
+    char *words = malloc(word_block);
+
+    for (int i=0; i < words_to_read; i++) {
+
+        long read_string = ptrace_peekdata(pid, addr); 
+        
+        if (read_string < 0)
+            return NULL;
+
+        memcpy(words + (i * WORD), (char *) &read_string, WORD);
+
+        addr += WORD;
+    }
+ 
+    words[rgs.rdx] = '\0';
+
+    PyObject *io = PyDict_New();
+    PyDict_SetItem(io, PyLong_FromLong(fd_key),
+                       PyUnicode_FromString(words));
+
+    return io;
+}
+
+static PyObject *bluebird_cext_resume(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+
+    if (!PyArg_ParseTuple(args, "i:resume", &pid))
+        return NULL;
+
+    int status;
+    if (waitpid(pid, &status, __WALL | WNOHANG) < 0) {
+        handle_error();
+        return NULL;
+    }
+    
+    if (!WIFSTOPPED(status))
+        Py_RETURN_NONE;
+
+    if (ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+        return NULL;
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *bluebird_cext_get_syscalls(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    int nsyscalls;
+
+    if (!PyArg_ParseTuple(args, "ii:get_syscalls", &pid, &nsyscalls))
+        return NULL;
+
+    PyObject *call_list = PyList_New(nsyscalls);
+
+
+    for (int i=0; i < nsyscalls; i++) {
+        int call = get_syscall(pid, 1, true);
+        PyObject *pycall = PyLong_FromLong(call);
+        PyList_SetItem(call_list, i, pycall);
+    }
+
+    return call_list;
+}
+
+static PyObject *bluebird_cext_goinit(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    unsigned const long addr;
+
+    if (!PyArg_ParseTuple(args, "ik:goinit", &pid, &addr))
+        return NULL;
+
+    struct user_regs_struct rg = { .rip=addr };
+
+    reset_ip(pid, &rg);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *bluebird_cext_writeint(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    unsigned const long addr;
+    const long wr_data;
+
+    if (!PyArg_ParseTuple(args, "ikl:writeint", &pid, &addr, &wr_data))
+        return NULL;
+
+    long writeint = ptrace_pokedata(pid, addr, wr_data);
+
+    if (writeint < 0) {
+        handle_error();
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *bluebird_cext_writestring(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+    unsigned long addr;
+    char *wr_data;
+
+    if (!PyArg_ParseTuple(args, "iks:writestring", &pid, &addr, &wr_data))
+        return NULL;
+
+    long *words = create_wordsize_array(wr_data);
+
+    /*
+    XXX debug
+    for (int i=0; words[i]; i++) {
+        PyObject *str = PyUnicode_FromString(words[i]);
+        PyObject_Print(str, stdout, Py_PRINT_RAW);
+
+    }
+    */
+    
+    for (int i=0; words[i] != 0; i++) {
+        if (ptrace_pokedata(pid, addr, words[i]) < 0) {
+            handle_error();
+            return NULL;
+        }
+
+        addr += WORD;
+    }
+
+    free(words);
+
+    ptrace(PTRACE_CONT, pid, 0, 0);
+
+    Py_RETURN_NONE;
+}
+
+static PyObject *bluebird_cext_signal(PyObject *self, PyObject *args)
+{
+    int ptrace_signal; 
+    pid_t pid;
+
+    if (!PyArg_ParseTuple(args, "ii:signal", &pid, &ptrace_signal)) 
+        return NULL;
+
+    if (ptrace_call(PTRACE_CONT, pid, 0, ptrace_signal) < 0) { 
+        handle_error();
+        return NULL;
+    }
+
+    Py_RETURN_NONE;
+}
+
 static PyObject *bluebird_cext_bbrk(PyObject *self, PyObject *args)
 {
     int pid;
@@ -727,15 +736,6 @@ static PyObject *bluebird_cext_bbrk(PyObject *self, PyObject *args)
     insert_call(pid, _args, offsets, 2, heap_addr);
 
     Py_RETURN_NONE;
-}
-
-static int open_file(pid_t pid, long heap_addr, int mode)
-{
-    long args[] = { SYS_open, heap_addr, mode }; 
-    int offsets[] = { ORIG_RAX, RDI, RSI, RDX };
-    int fd = insert_call(pid, args, offsets, 4, heap_addr);
-
-    return fd;
 }
 
 static PyObject *bluebird_cext_openfd(PyObject *self, PyObject *args)
