@@ -100,21 +100,6 @@ static void ptrace_sleep(void)
     select(0, NULL, NULL, NULL, &tm);
 }
 
-static int ptrace_stop(pid_t pid)
-{
-    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) 
-        return -1;
-
-    ptrace_sleep();
-
-    if (ptrace_wait(pid) < 0) {
-        errno = ESRCH;
-        return -1;
-    }
-
-    return 0;
-}
-
 static int ptrace_wait(pid_t pid)
 {
     int status;
@@ -133,6 +118,21 @@ static int ptrace_wait(pid_t pid)
     errno = ESRCH;
 
     return -1;
+}
+
+static int ptrace_stop(pid_t pid)
+{
+    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) 
+        return -1;
+
+    ptrace_sleep();
+
+    if (ptrace_wait(pid) < 0) {
+        errno = ESRCH;
+        return -1;
+    }
+
+    return 0;
 }
 
 static bool is_stopped(pid_t pid)
@@ -163,36 +163,22 @@ static bool is_stopped(pid_t pid)
 }
 
 long ptrace_call(enum __ptrace_request req, pid_t pid, 
-                          unsigned long addr, long data)
+                 unsigned long addr, long data)
 {
-    int stopped = 0;
-
-    if (req != PTRACE_ATTACH && !is_stopped(pid)) 
-        stopped = ptrace_stop(pid);
-
-    if (stopped < 0) 
+    // 1st check if the request is attach if it is there is no need to sigstop
+    // 2nd check if process is already if it is there is no need to stop
+    // if the first two conditions aren't meet send a sigstop 
+    if (req != PTRACE_ATTACH && !is_stopped(pid) && ptrace_stop(pid) < 0)
         return -1;
 
+    // set errno to zero in case there was a peekdata that was holding -1
+    errno = 0;
     long ptrace_ret = ptrace(req, pid, addr, data);
 
-    /* corner case brought up on uber-pyflame: 
-     * ptrace_ret was a peek and the data at addr was -1 */
-
-    if (ptrace_ret < 0) 
+    if (ptrace_ret < 0 && errno != 0) {
+        handle_error(); 
         return -1;
-
-    /* XXX debug
-    PyObject *str = NULL;
-    if (req == PTRACE_ATTACH)
-        str = PyUnicode_FromString("attach\n");
-    else if (req == PTRACE_SYSCALL)
-        str = PyUnicode_FromString("syscall\n");
-    else if (req == PTRACE_GETREGS)
-        str = PyUnicode_FromString("getregs\n");
-    else if (req == PTRACE_CONT)
-        str = PyUnicode_FromString("cont\n");
-    PyObject_Print(str, stdout, Py_PRINT_RAW);
-    */
+    }
 
     return ptrace_ret;
 }
@@ -212,7 +198,8 @@ static int set_sys_step(pid_t pid, enum __ptrace_request step)
     if (ptrace_call(step, pid, 0, 0) < 0)
         return -1;
 
-    waitpid(pid, NULL, __WALL);
+    if (waitpid(pid, NULL, __WALL) < 0)
+        return -1;
 
     return 0;
 }
