@@ -204,27 +204,21 @@ static int set_sys_step(pid_t pid, enum __ptrace_request step)
     return 0;
 }
 
-static int get_syscall(pid_t pid, int enter, bool signal_cont)
+static int ptrace_syscall(pid_t pid, int enter, bool signal_cont)
 {
     struct user_regs_struct rgs;
 
+    int call = -ENOSYS;
 
-    while ( 1 ) {
+    while (call == -ENOSYS || call == 219) {
         if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
             goto error;
 
         if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
             goto error;
 
-        //  checking the restart_call kernel syscall after SIGSTP
-        //  orig_rax mask against 0x80 SIGTRAP for info on entry/exit?
-        if ((rgs.orig_rax == 219 && enter) || (signed) rgs.rax == -ENOSYS)
-            continue;
-        else
-            break;
+        call = rgs.orig_rax;
     }
-
-    int call = rgs.orig_rax;
 
     if (signal_cont && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
         goto error;
@@ -242,10 +236,7 @@ static int find_call(pid_t pid, int call, int enter, int timeout)
     clock_gettime(CLOCK_REALTIME, &ts);
     clock_t start = ts.tv_sec;
 
-    while (get_syscall(pid, enter, false) != call) {
-
-        if (ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) 
-            goto error;
+    while (ptrace_syscall(pid, enter, true) != call) {
 
         if (timeout > 0) {
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -255,10 +246,6 @@ static int find_call(pid_t pid, int call, int enter, int timeout)
     }
 
     return 0;
-
-error:
-    handle_error();
-    return -1;
 }
 
 static long *create_wordsize_array(char *data)
@@ -298,18 +285,6 @@ static long ptrace_peekdata(pid_t pid, unsigned const long addr)
     return peek_data;
 }
 
-static PyObject *bluebird_cext_continue_trace(PyObject *self, PyObject *args)
-{
-    pid_t pid;
-
-    if (!PyArg_ParseTuple(args, "i:continue_trace", &pid))
-        return NULL;
-
-    ptrace_call(PTRACE_CONT, pid, 0, 0);
-    
-    Py_RETURN_NONE;
-}
-
 static long ptrace_pokedata(pid_t pid, unsigned const long addr, 
                                            unsigned const long data)
 {
@@ -343,22 +318,6 @@ static bool is_traceable(void)
     return is_yama_enabled();
 }
 
-static int find_syscall_exit(pid_t pid)
-{
-    struct user_regs_struct rg;
-
-    while ( 1 ) {
-
-        if (set_sys_step(pid, PTRACE_SYSCALL) < 0 ||
-            ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0)
-            return -1;
-        else if (rg.orig_rax == 219)
-            break;
-    }
-
-    return 0;
-}
-
 static struct user_regs_struct *set_rip_local(pid_t pid, long heap_addr)
 {
     struct user_regs_struct *rg = malloc(sizeof *rg);
@@ -375,30 +334,12 @@ static struct user_regs_struct *set_rip_local(pid_t pid, long heap_addr)
     return rg;
 }
 
-static int find_syscall_entrance(pid_t pid)
-{
-    struct user_regs_struct rg;
-
-    while ( 1 ) {
-
-        if (set_sys_step(pid, PTRACE_SYSCALL) < 0 ||
-            ptrace(PTRACE_GETREGS, pid, 0, &rg) < 0) 
-            break;
-
-        if (rg.orig_rax == 219) continue;
-
-        return 0;
-    }
-
-    return -1;
-}
-
 static unsigned long long insert_call(pid_t pid, long *args, int *offsets, 
                                       int narg, long heap_addr)
 {
     struct user_regs_struct *orig_regs = NULL;
 
-    if (find_syscall_exit(pid) < 0)
+    if (ptrace_syscall(pid, 0, false) < 0)
         return -1;
 
     orig_regs = set_rip_local(pid, heap_addr);
@@ -406,7 +347,7 @@ static unsigned long long insert_call(pid_t pid, long *args, int *offsets,
     if (orig_regs == NULL)
         goto error;
 
-    if (find_syscall_entrance(pid) < 0)
+    if (ptrace_syscall(pid, 1, false) < 0)
         goto error;
 
     for (int i=0; i < narg; i++)
@@ -444,6 +385,18 @@ static int open_file(pid_t pid, long heap_addr, int mode)
     int fd = insert_call(pid, args, offsets, 4, heap_addr);
 
     return fd;
+}
+
+static PyObject *bluebird_cext_continue_trace(PyObject *self, PyObject *args)
+{
+    pid_t pid;
+
+    if (!PyArg_ParseTuple(args, "i:continue_trace", &pid))
+        return NULL;
+
+    ptrace_call(PTRACE_CONT, pid, 0, 0);
+    
+    Py_RETURN_NONE;
 }
 
 static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
@@ -523,7 +476,7 @@ static PyObject *bluebird_cext_get_syscall(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "i:get_syscall", &pid))
         return NULL;
 
-    int call = get_syscall(pid, 1, true);
+    int call = ptrace_syscall(pid, 1, true);
 
     PyObject *pycall = PyLong_FromLong(call);
 
@@ -548,9 +501,8 @@ static PyObject *bluebird_cext_collect_io_data(PyObject *self, PyObject *args)
      */
 
     struct user_regs_struct rgs;
-
-    if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
-        return NULL;
+    ptrace_stop(pid);
+    ptrace(PTRACE_GETREGS, pid, 0, &rgs);
 
     int fd_key = rgs.rdi;
     long addr = rgs.rsi;
@@ -563,9 +515,6 @@ static PyObject *bluebird_cext_collect_io_data(PyObject *self, PyObject *args)
 
         long read_string = ptrace_peekdata(pid, addr); 
         
-        if (read_string < 0)
-            return NULL;
-
         memcpy(words + (i * WORD), (char *) &read_string, WORD);
 
         addr += WORD;
@@ -614,7 +563,7 @@ static PyObject *bluebird_cext_get_syscalls(PyObject *self, PyObject *args)
 
 
     for (int i=0; i < nsyscalls; i++) {
-        int call = get_syscall(pid, 1, true);
+        int call = ptrace_syscall(pid, 1, true);
         PyObject *pycall = PyLong_FromLong(call);
         PyList_SetItem(call_list, i, pycall);
     }
@@ -667,15 +616,6 @@ static PyObject *bluebird_cext_writestring(PyObject *self, PyObject *args)
 
     long *words = create_wordsize_array(wr_data);
 
-    /*
-    XXX debug
-    for (int i=0; words[i]; i++) {
-        PyObject *str = PyUnicode_FromString(words[i]);
-        PyObject_Print(str, stdout, Py_PRINT_RAW);
-
-    }
-    */
-    
     for (int i=0; words[i] != 0; i++) {
         if (ptrace_pokedata(pid, addr, words[i]) < 0) {
             handle_error();

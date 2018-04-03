@@ -110,8 +110,8 @@ class BlueBirdTest(unittest.TestCase):
 
     def test_get_syscalls(self):
         test_syscalls = self.bluebird.get_ranged_syscalls(4)
-        calls = test_proc_syscalls * 2 
-        self.assertCountEqual(test_syscalls, calls)
+        self.assertEqual(set(test_syscalls), set(test_proc_syscalls))
+        self.assertEqual(4, len(test_syscalls))
      
     def test_find_syscall(self):
         getsid = syscalls['NR_getsid']
@@ -163,7 +163,7 @@ class BlueBirdTest(unittest.TestCase):
         fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 
                    self.test_proc_filename), '2':pts}
         self.assertEqual(fd_dict, self.bluebird.get_fds())
-     
+      
     def test_redirect_fd(self):
         self.bluebird.get_heap()
         redirect_file = '{}/redirect.txt'.format(os.getcwd())
