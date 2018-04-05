@@ -14,14 +14,14 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-
-/* The read would segfault the bird.  Check the input extra inspection. */
         
 #define WAIT_SLEEP 5000
 
 #define WORD (__WORDSIZE / CHAR_BIT)
 
 #define WORD_ALIGNED(data_length) data_length + (WORD - (data_length % WORD))
+
+#define EWAITBLK 0x100
 
 static void handle_error(void)
 {
@@ -82,6 +82,10 @@ static void handle_error(void)
         case (EAGAIN):
             exception = PyExc_BlockingIOError;
             break;
+        // Locally defined errnos
+        case (EWAITBLK):
+            exception = "WAITPID-BLKD";
+            break;
         default:
             message_str = "UNKNOWN";
     }
@@ -106,8 +110,10 @@ static int ptrace_wait(pid_t pid)
 
     for (int i=0; i < 2; i++) {
 
-        if (waitpid(pid, &status, __WALL | WNOHANG) < 0) 
+        if (waitpid(pid, &status, __WALL | WNOHANG) < 0) {
+            handle_error(); 
             return -1;
+        }
 
         if (WIFSTOPPED(status)) 
             return 0;
@@ -115,22 +121,22 @@ static int ptrace_wait(pid_t pid)
         ptrace_sleep();
     }
 
-    errno = ESRCH;
+    errno = EWAITBLK;
 
     return -1;
 }
 
 static int ptrace_stop(pid_t pid)
 {
-    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) 
+    if (sigqueue(pid, SIGSTOP, (union sigval) 0) < 0) {
+        handle_error(); 
         return -1;
+    }
 
     ptrace_sleep();
 
-    if (ptrace_wait(pid) < 0) {
-        errno = ESRCH;
+    if (ptrace_wait(pid) < 0) 
         return -1;
-    }
 
     return 0;
 }
@@ -211,6 +217,17 @@ static int ptrace_syscall(pid_t pid, int enter, bool signal_cont)
     int call = -ENOSYS;
 
     while (call == -ENOSYS || call == 219) {
+        if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
+            goto error;
+
+        if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
+            goto error;
+
+        call = rgs.orig_rax;
+    }
+
+    if (!enter) {
+
         if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
             goto error;
 
