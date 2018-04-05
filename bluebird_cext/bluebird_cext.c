@@ -84,7 +84,7 @@ static void handle_error(void)
             break;
         // Locally defined errnos
         case (EWAITBLK):
-            exception = "WAITPID-BLKD";
+            message_str = "WAITPID-BLKD";
             break;
         default:
             message_str = "UNKNOWN";
@@ -144,28 +144,26 @@ static int ptrace_stop(pid_t pid)
 static bool is_stopped(pid_t pid)
 {
     char proc_pid_path[PATH_MAX + 1];
-    snprintf(proc_pid_path, PATH_MAX, "/proc/%d/status", pid);
+    snprintf(proc_pid_path, PATH_MAX, "/proc/%d/stat", pid);
 
     FILE *fobj = fopen(proc_pid_path, "r");
 
     if (!fobj) 
-        return false;
+        goto error;
 
-    size_t n_bytes = 0;
-    char *fobj_ln = NULL;
-    bool pid_state = false;
+    char state;
+    if (fscanf(fobj, "%d%s %c", &pid, proc_pid_path, &state) < 0)
+        goto error;
 
-    while (getline(&fobj_ln, &n_bytes, fobj) != -1) {
-        if (strstr(fobj_ln, "State") &&
-            strstr(fobj_ln, "\tt")) {
-            pid_state = true;
-            break;
-        }
-    }
-    
     fclose(fobj);
 
+    bool pid_state = state == 't' ? true : false;
+
     return pid_state;
+
+error:
+    handle_error();
+    return false;
 }
 
 long ptrace_call(enum __ptrace_request req, pid_t pid, 
