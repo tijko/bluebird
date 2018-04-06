@@ -110,7 +110,6 @@ class BlueBirdTest(unittest.TestCase):
 
     def test_get_syscalls(self):
         test_syscalls = self.bluebird.get_ranged_syscalls(4)
-        self.assertEqual(set(test_syscalls), set(test_proc_syscalls))
         self.assertEqual(4, len(test_syscalls))
      
     def test_find_syscall(self):
