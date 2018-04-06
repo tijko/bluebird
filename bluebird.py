@@ -54,12 +54,12 @@ except FileNotFoundError:
 
 syscalls = dict()
 
-for syscall_raw in syscalls_raw.split('\n'):
-    if syscall_raw.startswith('#define __'):
-        _, call_name, call_number = syscall_raw.split()
-        syscalls[call_name.strip('__')] = int(call_number)
+for call in filter(lambda s: s.startswith('#define __'),
+                   syscalls_raw.split('\n')):
+    _, call_name, call_number = call.split()
+    syscalls[call_name.strip('__NR_')] = int(call_number)
 
-if syscalls.get('NR_ptrace') is None:
+if syscalls.get('ptrace') is None:
     raise PtraceCallNotFoundError
 
 
@@ -164,14 +164,14 @@ class Bluebird(object):
         return dict(map(lambda s: s.split('=', 1), env_var))
 
     def write_trace(self, number_of_calls):
-        wr_call = syscalls['NR_write']
+        wr_call = syscalls['write']
         for call in range(number_of_calls):
             for fd, read_data in collect_io_data(self.traced_pid, wr_call).items():
                 self.wdata[fd].append(read_data)
         self.cont_trace()
 
     def read_trace(self, number_of_calls):
-        rd_call = syscalls['NR_read']
+        rd_call = syscalls['read']
         for call in range(number_of_calls):
             for fd, read_data in collect_io_data(self.traced_pid, rd_call).items():
                 self.rdata[fd].append(read_data)
