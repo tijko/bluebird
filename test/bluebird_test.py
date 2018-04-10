@@ -161,7 +161,7 @@ class BlueBirdTest(unittest.TestCase):
         cdir = os.getcwd() 
         fd_dict = {'0':pts, '1':'{}/{}'.format(cdir, 
                    self.test_proc_filename), '2':pts}
-        self.assertEqual(fd_dict, self.bluebird.get_fds())
+        self.assertDictEqual(fd_dict, self.bluebird.get_fds())
       
     def test_redirect_fd(self):
         self.bluebird.get_heap()
@@ -169,28 +169,26 @@ class BlueBirdTest(unittest.TestCase):
         sleep(1)
         self.bluebird.redirect_fd(1, redirect_file)
         sleep(1)
-        self.assertNotEqual(os.stat(redirect_file).st_size, 0)
+        redirect_filesize = os.stat(redirect_file).st_size
+        self.assertTrue(redirect_filesize)
     
     def test_get_trace_dir(self):
         cdir = os.getcwd()
-        self.bluebird.get_heap()
-        self.assertEqual(cdir, self.bluebird.get_trace_dir()) 
+        bluebird_dir = self.bluebird.get_trace_dir()
+        self.assertEqual(cdir, bluebird_dir) 
     
     def test_getenv(self):
         with open('/proc/{}/environ'.format(self.test_proc_pid)) as fh:
-            environ = fh.read()
-        environ = environ.split('\x00')
-        environ = [var for var in environ if var]
-        env_dict = dict(map(lambda s: s.split('=', 1), environ))
+            environ = fh.read().split('\x00')
+        env_dict = dict(map(lambda s: s.split('=', 1), filter(None, environ)))
         bluebird_env = self.bluebird.getenv()
-        self.assertEqual(env_dict, bluebird_env)
+        self.assertDictEqual(env_dict, bluebird_env)
 
     def test_write_trace(self):
         process_str = 'Process <{}> is running!\n'.format(self.test_proc_pid)
+        process_str_dict = {1:[process_str] * 4}
         self.bluebird.write_trace(4)
-        for fd in self.bluebird.wdata:
-            self.assertEqual(process_str, self.bluebird.wdata[fd][0])
-        self.assertEqual(len(list(self.bluebird.wdata.values())[0]), 4)
+        self.assertDictEqual(self.bluebird.wdata, process_str_dict)
 
     def test_detach(self):
         tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
@@ -198,7 +196,15 @@ class BlueBirdTest(unittest.TestCase):
         self.bluebird.stop()
         sleep(1)
         tracer_pid = parse_proc_status(self.test_proc_pid, 'TracerPid')
-        self.assertEqual(0, tracer_pid)
+        self.assertFalse(tracer_pid)
+
+    def test_restart(self):
+        restart = 'Starting...\n'
+        self.bluebird.restart()
+        with open(self.test_proc_filename) as test_file:
+            proc_output = test_file.readlines()
+        self.assertEqual(2, proc_output.count(restart))
+        self.assertIn(restart, proc_output[1:])
         
 
 if __name__ == '__main__':
