@@ -211,45 +211,38 @@ static int set_sys_step(pid_t pid, enum __ptrace_request step)
     return ret;
 }
 
-static int ptrace_syscall(pid_t pid, int enter, bool signal_cont)
+static int get_callnum(pid_t pid)
 {
     struct user_regs_struct rgs;
-
-    int call = -ENOSYS;
     long ret = 0;
 
+    if ((ret = set_sys_step(pid, PTRACE_SYSCALL)) < 0)
+        return ret;
+
+    if ((ret = ptrace(PTRACE_GETREGS, pid, 0, &rgs)) < 0) {
+        handle_error();
+        return -1;
+    }    
+
+    return rgs.orig_rax;
+}
+
+static int ptrace_syscall(pid_t pid, int enter, bool signal_cont)
+{
+    int call = -ENOSYS;
+
     while (call == -ENOSYS || call == 219) {
-        if ((ret = set_sys_step(pid, PTRACE_SYSCALL)) < 0)
-            goto error;
-
-        if ((ret = ptrace(PTRACE_GETREGS, pid, 0, &rgs)) < 0) 
-            goto error_handle;
-
-        call = rgs.orig_rax;
+        if ((call = get_callnum(pid)) < 0)
+            return -1;
     }
 
-    if (!enter) {
+    if (!enter && (call = get_callnum(pid)) < 0) 
+        return -1;
 
-        if ((ret = set_sys_step(pid, PTRACE_SYSCALL)) < 0)
-            goto error;
-
-        if ((ret = ptrace(PTRACE_GETREGS, pid, 0, &rgs)) < 0) 
-            goto error_handle;
-
-        call = rgs.orig_rax;
-    }
-
-    if (signal_cont == true) {
-        if ((ret = ptrace_call(PTRACE_CONT, pid, 0, 0)) < 0)
-            goto error_handle;
-    }
+    if (signal_cont == true && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+        return -1;
 
     return call;
-
-error_handle:
-    handle_error();
-error:
-    return ret;
 }
 
 static int find_call(pid_t pid, int call, int enter, int timeout)
