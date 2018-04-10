@@ -189,60 +189,60 @@ long ptrace_call(enum __ptrace_request req, pid_t pid,
 
 static int reset_ip(pid_t pid, struct user_regs_struct *rg)
 {
-    if (ptrace(PTRACE_SETREGS, pid, 0, rg) < 0 ||
-        ptrace_call(PTRACE_CONT, pid, 0, 0) < 0) {
-        return -1;
-    }
+    long ret = 0;
 
-    return 0;
+    if ((ret = ptrace(PTRACE_SETREGS, pid, 0, rg)) < 0)
+        handle_error();
+
+    ret = ptrace_call(PTRACE_CONT, pid, 0, 0);
+
+    return ret;
 }
 
 static int set_sys_step(pid_t pid, enum __ptrace_request step)
 {
-    if (ptrace_call(step, pid, 0, 0) < 0)
-        return -1;
+    long ret = 0;
 
-    if (waitpid(pid, NULL, __WALL) < 0)
-        return -1;
+    ret = ptrace_call(step, pid, 0, 0);
 
-    return 0;
+    if ((ret = waitpid(pid, NULL, __WALL)) < 0)
+        handle_error();
+
+    return ret;
+}
+
+static int get_callnum(pid_t pid)
+{
+    struct user_regs_struct rgs;
+    long ret = 0;
+
+    if ((ret = set_sys_step(pid, PTRACE_SYSCALL)) < 0)
+        return ret;
+
+    if ((ret = ptrace(PTRACE_GETREGS, pid, 0, &rgs)) < 0) {
+        handle_error();
+        return -1;
+    }    
+
+    return rgs.orig_rax;
 }
 
 static int ptrace_syscall(pid_t pid, int enter, bool signal_cont)
 {
-    struct user_regs_struct rgs;
-
     int call = -ENOSYS;
 
     while (call == -ENOSYS || call == 219) {
-        if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
-            goto error;
-
-        if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
-            goto error;
-
-        call = rgs.orig_rax;
+        if ((call = get_callnum(pid)) < 0)
+            return -1;
     }
 
-    if (!enter) {
+    if (!enter && (call = get_callnum(pid)) < 0) 
+        return -1;
 
-        if (set_sys_step(pid, PTRACE_SYSCALL) < 0)
-            goto error;
-
-        if (ptrace(PTRACE_GETREGS, pid, 0, &rgs) < 0) 
-            goto error;
-
-        call = rgs.orig_rax;
-    }
-
-    if (signal_cont && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
-        goto error;
+    if (signal_cont == true && ptrace_call(PTRACE_CONT, pid, 0, 0) < 0)
+        return -1;
 
     return call;
-
-error:
-    handle_error();
-    return -1;
 }
 
 static int find_call(pid_t pid, int call, int enter, int timeout)
@@ -251,7 +251,12 @@ static int find_call(pid_t pid, int call, int enter, int timeout)
     clock_gettime(CLOCK_REALTIME, &ts);
     clock_t start = ts.tv_sec;
 
-    while (ptrace_syscall(pid, enter, true) != call) {
+    long ret = 0;
+
+    while ((ret = ptrace_syscall(pid, enter, true)) != call) {
+
+        if (ret < 0)
+            break;
 
         if (timeout > 0) {
             clock_gettime(CLOCK_REALTIME, &ts);
@@ -260,7 +265,7 @@ static int find_call(pid_t pid, int call, int enter, int timeout)
         }
     }
 
-    return 0;
+    return ret;
 }
 
 static long *create_wordsize_array(char *data)
@@ -272,19 +277,14 @@ static long *create_wordsize_array(char *data)
     if (data_length % WORD != 0)
         num_of_words += 1;
 
-    int word_aligned = WORD_ALIGNED(data_length);
-    char *word_buffer = malloc(sizeof(char) * word_aligned + 1);
-    memset(word_buffer, '\0', word_aligned);
-
+    char word_buffer[WORD + 1] = { '\0' };
     long *words = malloc(sizeof *words * num_of_words + 1);
 
     for (int i=0; i < num_of_words; i++) {
-        strcpy(word_buffer, data + (WORD * i));
-        word_buffer[WORD] = '\0';
+        memcpy(word_buffer, data + (WORD * i), WORD);
         words[i] = *(long *) word_buffer;
     }
 
-    free(word_buffer);
     words[num_of_words] = 0;
 
     return words;

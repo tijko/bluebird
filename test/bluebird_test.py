@@ -113,7 +113,7 @@ class BlueBirdTest(unittest.TestCase):
         self.assertEqual(4, len(test_syscalls))
      
     def test_find_syscall(self):
-        getsid = syscalls['NR_getsid']
+        getsid = syscalls['getsid']
         test_find = self.bluebird.find_call(getsid)
         while self.bluebird.tracing:
             sleep(1)
@@ -204,7 +204,7 @@ class BlueBirdTest(unittest.TestCase):
 if __name__ == '__main__':
     compile_test_bin()
     test_pid = os.getpid()
-    write, nanosleep = syscalls['NR_write'], syscalls['NR_nanosleep']
+    write, nanosleep = syscalls['write'], syscalls['nanosleep']
     test_proc_addr = find_string_address('Process')
     test_proc_syscalls = (write, nanosleep)
     unittest.main(verbosity=3, exit=False)
