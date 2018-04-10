@@ -191,10 +191,9 @@ static int reset_ip(pid_t pid, struct user_regs_struct *rg)
 {
     long ret = 0;
 
-    if ((ret = ptrace(PTRACE_SETREGS, pid, 0, rg)) < 0)
-        handle_error();
+    ptrace(PTRACE_SETREGS, pid, 0, rg);
 
-    ret = ptrace_call(PTRACE_CONT, pid, 0, 0);
+    ret = ptrace(PTRACE_CONT, pid, 0, 0);
 
     return ret;
 }
@@ -594,9 +593,14 @@ static PyObject *bluebird_cext_goinit(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ik:goinit", &pid, &addr))
         return NULL;
 
-    struct user_regs_struct rg = { .rip=addr };
+    struct user_regs_struct *rg = calloc(1, sizeof *rg);
+    rg->rip = addr;
+    
+    if (!is_stopped(pid))
+        ptrace_stop(pid);
 
-    reset_ip(pid, &rg);
+    reset_ip(pid, rg);
+    free(rg);
 
     Py_RETURN_NONE;
 }
