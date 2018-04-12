@@ -289,16 +289,6 @@ static long *create_wordsize_array(char *data)
     return words;
 }
 
-static long ptrace_peekdata(pid_t pid, unsigned const long addr)
-{
-    long peek_data = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
-
-    if (peek_data < 0)
-        return -1;
-
-    return peek_data;
-}
-
 static long ptrace_pokedata(pid_t pid, unsigned const long addr, 
                                            unsigned const long data)
 {
@@ -426,7 +416,7 @@ static PyObject *bluebird_cext_readstring(PyObject *self, PyObject *args)
 
     for (int i=0; i < words_to_read; i++) {
 
-        long read_string = ptrace_peekdata(pid, addr); 
+        long read_string = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
         
         if (read_string < 0)
             goto error;
@@ -473,7 +463,7 @@ static PyObject *bluebird_cext_readint(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ik:readint", &pid, &addr))
         return NULL;
 
-    long read_int = ptrace_peekdata(pid, addr);
+    long read_int = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
 
     if (read_int < 0) {
         handle_error();
@@ -527,7 +517,7 @@ static PyObject *bluebird_cext_collect_io_data(PyObject *self, PyObject *args)
 
     for (int i=0; i < words_to_read; i++) {
 
-        long read_string = ptrace_peekdata(pid, addr); 
+        long read_string = ptrace_call(PTRACE_PEEKDATA, pid, addr, 0);
         
         memcpy(words + (i * WORD), (char *) &read_string, WORD);
 
