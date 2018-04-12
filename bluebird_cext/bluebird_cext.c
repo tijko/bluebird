@@ -289,17 +289,6 @@ static long *create_wordsize_array(char *data)
     return words;
 }
 
-static long ptrace_pokedata(pid_t pid, unsigned const long addr, 
-                                           unsigned const long data)
-{
-    long write_ret = ptrace_call(PTRACE_POKEDATA, pid, addr, data); 
-
-    if (write_ret < 0)
-        return -1;
-
-    return write_ret;
-}
-
 static bool is_yama_enabled(void)
 {
     char *yama_path = "/proc/sys/kernel/yama/ptrace_scope";
@@ -604,7 +593,7 @@ static PyObject *bluebird_cext_writeint(PyObject *self, PyObject *args)
     if (!PyArg_ParseTuple(args, "ikl:writeint", &pid, &addr, &wr_data))
         return NULL;
 
-    long writeint = ptrace_pokedata(pid, addr, wr_data);
+    long writeint = ptrace_call(PTRACE_POKEDATA, pid, addr, wr_data);
 
     if (writeint < 0) {
         handle_error();
@@ -626,10 +615,8 @@ static PyObject *bluebird_cext_writestring(PyObject *self, PyObject *args)
     long *words = create_wordsize_array(wr_data);
 
     for (int i=0; words[i] != 0; i++) {
-        if (ptrace_pokedata(pid, addr, words[i]) < 0) {
-            handle_error();
+        if (ptrace_call(PTRACE_POKEDATA, pid, addr, words[i]) < 0) 
             return NULL;
-        }
 
         addr += WORD;
     }
